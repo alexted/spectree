@@ -4,10 +4,7 @@ from typing import (
     Protocol,
 )
 
-from spectree.model_adapter.protocol import (
-    ModelAdapter,
-    ModelSpec,
-)
+from spectree.model_adapter.protocol import ModelAdapter, ModelSpec
 
 NamingStrategy = Callable[[ModelSpec], str]
 NestedNamingStrategy = Callable[[str, str], str]

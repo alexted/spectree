@@ -46,21 +46,23 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         """
         ...
 
-    def is_partial_model_instance(self, value: Any) -> bool: ...
+    def is_partial_model_instance(self, value: Any) -> bool:
+        ...
 
     def validate_obj(
         self,
         model: ModelSpec,
-        value: Any,
-    ) -> ModelT: ...
+        value: Any,) -> ModelT:
+        ...
 
     def validate_json(
         self,
         model: ModelSpec,
-        value: bytes,
-    ) -> ModelT: ...
+        value: bytes,) -> ModelT:
+        ...
 
-    def dump_json(self, value: Any) -> bytes: ...
+    def dump_json(self, value: Any) -> bytes:
+        ...
 
     def make_root_model(
         self,
@@ -68,7 +70,8 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         name: str | None = None,
         module: str | None = None,
-    ) -> ModelSpec: ...
+    ) -> ModelSpec:
+        ...
 
     def make_list_model(
         self,
@@ -81,9 +84,11 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         ref_template: str,
         mode: SchemaMode = "validation",
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        ...
 
     def validation_errors(
         self,
         err: ValidationErrorT,
-    ) -> Any: ...
+    ) -> Any:
+        ...

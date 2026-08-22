@@ -134,7 +134,6 @@ class Response:
         model_adapter: ModelAdapterType,
     ) -> ModelSpec:
         origin_type = get_origin(raw_model)
-
         if origin_type is list:
             args = get_args(raw_model)
 
