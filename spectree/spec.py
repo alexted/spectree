@@ -518,7 +518,7 @@ class SpecTree:
     def _get_model_definitions(
         self,
         models: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Extract nested $defs into OpenAPI components without mutating the
         supplied schema mapping.
