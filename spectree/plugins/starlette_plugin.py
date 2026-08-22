@@ -12,7 +12,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import compile_path
 
 from spectree._types import HookHandler, ModelAdapterType
-from spectree.model_adapter import ModelClass
+from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import (
     BasePlugin,
     Context,
@@ -28,10 +28,10 @@ _active_model_adapter: ContextVar[ModelAdapterType | None] = ContextVar(
     "spectree_starlette_model_adapter",
     default=None,
 )
-_response_models: dict[object, ModelClass] = {}
+_response_models: dict[object, ModelSpec] = {}
 
 
-def _get_response_model(model_adapter: ModelAdapterType) -> ModelClass:
+def _get_response_model(model_adapter: ModelAdapterType) -> ModelSpec:
     response_model = _response_models.get(model_adapter)
     if response_model is None:
         response_model = model_adapter.make_root_model(
@@ -115,12 +115,12 @@ class StarlettePlugin(BasePlugin):
     async def validate(
         self,
         func: Callable,
-        query: ModelClass | None,
-        json: ModelClass | None,
-        form: ModelClass | None,
-        headers: ModelClass | None,
-        cookies: ModelClass | None,
-        resp: Response | None,
+        query: Optional[ModelSpec],
+        json: Optional[ModelSpec],
+        form: Optional[ModelSpec],
+        headers: Optional[ModelSpec],
+        cookies: Optional[ModelSpec],
+        resp: Optional[Response],
         before: HookHandler,
         after: HookHandler,
         validation_error_status: int,
