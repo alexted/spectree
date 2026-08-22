@@ -39,7 +39,7 @@ from spectree.utils import (
     get_security,
     parse_comments,
     parse_name,
-    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
+    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
 )
 
 
@@ -316,7 +316,7 @@ class SpecTree:
                     )
                     compiled_resp._set_model_key(code, model_key)
 
-                metadata.resp = compiled_resp
+                validation.resp = compiled_resp
 
             if tags:
                 metadata.tags = tags
@@ -356,7 +356,7 @@ class SpecTree:
             schema=schema,
         )
 
-    def _generate_spec(self) -> dict[str, Any]:
+    def _generate_spec(self) -> Dict[str, Any]:
         """
         generate OpenAPI spec according to routes and decorators
         """

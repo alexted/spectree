@@ -75,6 +75,7 @@ class Response:
         self._model_keys: dict[str, str] = {}
         self._model_keys: dict[str, str] = {}
         self._model_keys: dict[str, str] = {}
+        self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             description: str | None = None
