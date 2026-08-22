@@ -5,11 +5,7 @@ from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
 
 import msgspec
 
-from spectree.model_adapter.protocol import (
-    ModelAdapter,
-    ModelSpec,
-    SchemaMode,
-)
+from spectree.model_adapter.protocol import ModelAdapter, SchemaMode, ModelSpec
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
 
