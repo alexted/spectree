@@ -24,7 +24,7 @@ from spectree.metadata import (
     iter_wrapped_functions,
     register_validated_function,
 )
-from spectree.model_adapter import ModelClass, get_pydantic_model_adapter
+from spectree.model_adapter import ModelSpec, get_pydantic_model_adapter
 from spectree.model_adapter.protocol import SchemaMode
 from spectree.models import Tag
 from spectree.plugins import PLUGINS, BasePlugin
@@ -88,7 +88,7 @@ class SpecTree:
         before: HookHandler = default_before_handler,
         after: HookHandler = default_after_handler,
         validation_error_status: int = 422,
-        validation_error_model: ModelClass | None = None,
+        validation_error_model: Optional[ModelSpec] = None,
         naming_strategy: NamingStrategy = get_model_key,
         nested_naming_strategy: NestedNamingStrategy = get_nested_key,
         model_adapter: ModelAdapterType | None = None,
@@ -170,12 +170,12 @@ class SpecTree:
 
     def validate(  # noqa: PLR0913, PLR0917
         self,
-        query: ModelClass | None = None,
-        json: ModelClass | None = None,
-        form: ModelClass | None = None,
-        headers: ModelClass | None = None,
-        cookies: ModelClass | None = None,
-        resp: Response | None = None,
+        query: Optional[ModelSpec] = None,
+        json: Optional[ModelSpec] = None,
+        form: Optional[ModelSpec] = None,
+        headers: Optional[ModelSpec] = None,
+        cookies: Optional[ModelSpec] = None,
+        resp: Optional[Response] = None,
         tags: Sequence = (),
         security: Any = None,
         deprecated: bool = False,
@@ -333,7 +333,7 @@ class SpecTree:
 
     def _add_model(
             self,
-            model: ModelClass,
+            model: ModelSpec,
             mode: SchemaMode = "validation",
     ) -> str:
         """

@@ -23,7 +23,7 @@ from spectree._types import (
     NamingStrategy,
 )
 from spectree.metadata import FunctionDecorator
-from spectree.model_adapter import ModelClass
+from spectree.model_adapter import ModelSpec
 
 # parse HTTP status code to get the code
 HTTP_CODE = re.compile(r"^HTTP_(?P<code>\d{3})$")
@@ -89,7 +89,7 @@ def parse_params(
 def has_model(metadata: FunctionDecorator) -> bool:
     """
     return True if this function have
-    :py:class:`spectree.model_adapter.ModelClass`
+    :py:class:`spectree.model_adapter.ModelSpec`
     """
     return metadata.has_model()
 
@@ -176,7 +176,7 @@ def hash_module_path(module_path: str):
     return sha1(module_path.encode()).hexdigest()[:7]
 
 
-def get_model_key(model: ModelClass) -> str:
+def get_model_key(model: ModelSpec) -> str:
     """
     generate model name suffixed by short hashed path (instead of its path to
     avoid code-structure leaking)
@@ -232,8 +232,8 @@ def get_security(security: Mapping | Sequence[Any] | None) -> list[Any]:
 
 
 def get_multidict_items(
-    multidict: MultiDict, model: ModelClass | None = None
-) -> dict[str, str | list[str] | None]:
+    multidict: MultiDict, model: Optional[ModelSpec] = None
+) -> dict[str, Union[str, list[str], None]]:
     """
     return the items of a :class:`werkzeug.datastructures.ImmutableMultiDict`
     """
@@ -249,7 +249,7 @@ def get_multidict_items(
 
 
 def get_multidict_items_starlette(
-    multidict: MultiDictStarlette, model: ModelClass | None = None
+    multidict: MultiDictStarlette, model: Optional[ModelSpec] = None
 ):
     """
     return the items of a :class:`starlette.datastructures.ImmutableMultiDict`
@@ -311,7 +311,7 @@ def get_request_model_hints(func: Callable[..., Any]) -> Mapping[str, Any]:
     return get_type_hints(proxy, localns=localns or None, include_extras=True)
 
 
-def is_list_item(key: str, model: ModelClass | None) -> bool:
+def is_list_item(key: str, model: Optional[ModelSpec]) -> bool:
     """Check if this key is a list item in the model."""
     if model is None:
         return False
