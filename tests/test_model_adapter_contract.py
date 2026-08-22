@@ -666,3 +666,9 @@ def test_plain_dataclass_is_partial_model_instance(model_case):
     instance = SimpleModel(user_id=1)
 
     assert model_case.adapter.is_partial_model_instance(instance) is True
+
+
+def test_model_spec_accepts_generic_alias():
+    model: ModelSpec = list[DemoModel]
+    assert model == list[DemoModel]
+
