@@ -39,7 +39,7 @@ from spectree.utils import (
     get_security,
     parse_comments,
     parse_name,
-    json_compatible_deepcopy, json_compatible_deepcopy,
+    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
 )
 
 
@@ -438,7 +438,7 @@ class SpecTree:
     def _get_model_definitions(
             self,
             models: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Extract nested $defs into OpenAPI components without mutating
         the registry.
