@@ -1,5 +1,6 @@
 import sys
 from collections.abc import Iterable
+from copy import copy
 from http import HTTPStatus
 from typing import Any, TypeAlias
 
@@ -71,6 +72,7 @@ class Response:
 
         self.code_models: dict[str, ModelClass] = {}
         self.code_descriptions: dict[str, str | None] = {}
+        self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             description: str | None = None
@@ -94,6 +96,30 @@ class Response:
 
             if description:
                 self.code_descriptions[code] = description
+
+    def copy_for_model_adapter(
+            self,
+            model_adapter: ModelAdapterType,
+    ) -> "Response":
+        """
+        Create an adapter-bound copy without mutating this declaration.
+
+        The original Response remains reusable with another SpecTree/model adapter.
+        """
+        response = copy(self)
+
+        response.codes = list(self.codes)
+        response._raw_code_models = dict(self._raw_code_models)
+        response.code_descriptions = dict(self.code_descriptions)
+
+        response.model_adapter = model_adapter
+        response.code_models = response._build_models(model_adapter)
+        response._model_keys = {}
+
+        return response
+
+    def _set_model_key(self, code: str, model_key: str) -> None:
+        self._model_keys[code] = model_key
 
     def bind_model_adapter(self, model_adapter: ModelAdapterType) -> None:
         """Bind a :py:class:`~spectree.model_adapter.ModelAdapter`"""
@@ -181,6 +207,7 @@ class Response:
         :returns: JSON
         """
         responses: dict[str, Any] = {}
+
         for code in self.codes:
             responses[parse_code(code)] = {
                 "description": self.get_code_description(code)
@@ -190,7 +217,8 @@ class Response:
             raise RuntimeError("Response must be bound to a model adapter")
 
         for code, model in self.code_models.items():
-            model_name = naming_strategy(model)
+            model_name = self._model_keys.get(code) or naming_strategy(model)
+
             responses[parse_code(code)] = {
                 "description": self.get_code_description(code),
                 "content": {
