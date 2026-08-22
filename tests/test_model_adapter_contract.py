@@ -6,7 +6,10 @@ from spectree.utils import get_model_key, hash_module_path
 from tests.common_dataclass import (
     NestedDataclass,
     SimpleModel,
+    DemoModel
 )
+from spectree.model_adapter import ModelSpec
+
 
 
 def _partial_model_instance_value(model_case, kind):
@@ -549,3 +552,9 @@ def test_compiled_model_annotation_preserves_origin(model_case):
         )
         is False
     )
+
+
+def test_model_spec_accepts_generic_alias():
+    model: ModelSpec = list[DemoModel]
+    assert model == list[DemoModel]
+

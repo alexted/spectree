@@ -8,7 +8,7 @@ pytest.importorskip("msgspec")
 import msgspec
 
 import spectree.model_adapter as model_adapter_module
-from spectree import Response
+from spectree import Response, model_adapter
 from spectree.config import Configuration
 from spectree.model_adapter import get_msgspec_model_adapter
 from spectree.model_adapter.msgspec_adapter import MsgspecModelAdapter
