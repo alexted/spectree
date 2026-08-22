@@ -2,7 +2,6 @@ from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
 ModelClass: TypeAlias = type[Any]
 ModelSpec: TypeAlias = Any
-
 ModelT = TypeVar("ModelT")
 ValidationErrorT = TypeVar("ValidationErrorT", bound=Exception)
 BaseFileT = TypeVar("BaseFileT")
