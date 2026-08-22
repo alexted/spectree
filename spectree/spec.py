@@ -1,4 +1,3 @@
-import warnings
 import weakref
 from collections import defaultdict
 from functools import wraps
@@ -9,6 +8,7 @@ from typing import (
     Mapping,
     Sequence,
     Dict,
+    Optional
 )
 
 from spectree._types import (
@@ -39,9 +39,8 @@ from spectree.utils import (
     get_security,
     parse_comments,
     parse_name,
-    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
     json_compatible_deepcopy,
-    get_request_model_hints
+
 )
 from spectree.endpoint import EndpointSpec, REQUEST_MODEL_ARGUMENTS
 
@@ -333,15 +332,35 @@ class SpecTree:
             for name, model_key in request_model_keys.items():
                 setattr(validation, name, model_key)
 
-            validation.resp = compiled_resp
-            validation.tags = endpoint.tags
-            validation.security = endpoint.security
-            validation.deprecated = endpoint.deprecated
-            validation.path_parameter_descriptions = (
-                endpoint.path_parameter_descriptions
-            )
-            validation.operation_id = endpoint.operation_id
-            validation._endpoint_spec = endpoint
+            if resp:
+                compiled_resp = resp.copy_for_model_adapter(self.model_adapter)
+
+                # Make sure that the endpoint-specific status code and data model
+                # for validation errors shows up in the response spec.
+                compiled_resp.add_model(
+                    validation_error_status,
+                    self.validation_error_model
+                    or self.model_adapter.validation_error,
+                    replace=False,
+                )
+
+                for code, model in compiled_resp.code_models.items():
+                    model_key = self._add_model(
+                        model=model,
+                        mode="serialization",
+                    )
+                    compiled_resp._set_model_key(code, model_key)
+
+                validation.resp = compiled_resp
+
+            if tags:
+                validation.tags = tags
+
+            validation.security = security
+            validation.deprecated = deprecated
+            validation.path_parameter_descriptions = path_parameter_descriptions
+            validation.operation_id = operation_id
+            # register decorator
             validation._decorator = self
 
             return validation
