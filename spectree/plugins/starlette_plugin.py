@@ -113,11 +113,21 @@ class StarlettePlugin(BasePlugin):
         )
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        query: Optional[ModelSpec],
+        json: Optional[ModelSpec],
+        form: Optional[ModelSpec],
+        headers: Optional[ModelSpec],
+        cookies: Optional[ModelSpec],
+        resp: Optional[Response],
+        before: HookHandler,
+        after: HookHandler,
+        validation_error_status: int,
+        skip_validation: bool,
+        force_resp_serialize: bool,
+        *args: Any,
+        **kwargs: Any,
     ):
         async def call_with_model_adapter() -> Any:
             model_adapter_token = _active_model_adapter.set(

@@ -116,12 +116,12 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         if value is ValidationError:
             return True
 
-        if not isinstance(value, type):
-            try:
-                TypeAdapter(value)
-            except (TypeError, ValueError):
-                return False
-            return True
+    def is_model_type(self, value: ModelSpec) -> bool:
+        return (
+            value is ValidationError
+            or issubclass(value, BaseModel)
+            or is_dataclass(value)
+        )
 
         return issubclass(value, BaseModel) or is_dataclass(value)
 

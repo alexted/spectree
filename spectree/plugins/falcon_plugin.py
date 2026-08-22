@@ -3,7 +3,7 @@ import inspect
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, Optional
 
 try:
     # some platforms may ban `tempfile`, e.g. Google App Engine
@@ -318,11 +318,21 @@ class FalconPlugin(BasePlugin):
         return resp_validation_error
 
     def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        query: Optional[ModelSpec],
+        json: Optional[ModelSpec],
+        form: Optional[ModelSpec],
+        headers: Optional[ModelSpec],
+        cookies: Optional[ModelSpec],
+        resp: Optional[Response],
+        before: HookHandler,
+        after: HookHandler,
+        validation_error_status: int,
+        skip_validation: bool,
+        force_resp_serialize: bool,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
@@ -433,11 +443,21 @@ class FalconAsgiPlugin(FalconPlugin):
             req.context.form = self.model_adapter.validate_obj(form, req_form)
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        query: Optional[ModelSpec],
+        json: Optional[ModelSpec],
+        form: Optional[ModelSpec],
+        headers: Optional[ModelSpec],
+        cookies: Optional[ModelSpec],
+        resp: Optional[Response],
+        before: HookHandler,
+        after: HookHandler,
+        validation_error_status: int,
+        skip_validation: bool,
+        force_resp_serialize: bool,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
