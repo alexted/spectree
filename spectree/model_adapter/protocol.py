@@ -42,7 +42,12 @@ class CompiledModel(Protocol[ModelT]):
 
 
 class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
-    """Contract for model validation, serialization and schema generation."""
+    """The protocol of model adapter.
+
+    A model spec is an adapter-defined runtime type expression. It may be a
+    model class, a generic alias such as ``list[User]``, ``Annotated[...]``,
+    or another type expression supported by the adapter.
+    """
 
     validation_error: type[ValidationErrorT]
     basefile: BaseFileT
@@ -51,12 +56,12 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         """Return whether value is a supported model/type expression."""
         ...
 
-    def is_model_instance(
-        self,
-        value: Any,
-        model: ModelSpec,
-    ) -> bool:
-        """Return whether value is already a valid instance of model."""
+    def is_model_instance(self, value: Any, model: ModelSpec) -> bool:
+        """Check if ``value`` is an instance of ``model`` under this adapter.
+
+        If it is already a valid model instance, runtime validation may be
+        skipped.
+        """
         ...
 
     def is_partial_model_instance(self, value: Any) -> bool:
@@ -74,13 +79,14 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
     def validate_json(
         self,
         model: ModelSpec,
-        value: bytes,
-    ) -> ModelT:
+        value: bytes,) -> ModelT:
         """Validate JSON bytes against a model specification."""
         ...
 
+    def validate_json(self, model: ModelSpec, value: bytes) -> ModelT:
+        ...
+
     def dump_json(self, value: Any) -> bytes:
-        """Serialize a value to JSON."""
         ...
 
     def make_root_model(
@@ -107,7 +113,7 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        """Generate the JSON schema for a model specification."""
+       """Generate the JSON schema for a model specification."""
         ...
 
     def validation_errors(
