@@ -347,31 +347,7 @@ class SpecTree:
                     )
                     compiled_resp._set_model_key(code, model_key)
 
-            endpoint = EndpointSpec(
-                query=query,
-                json=json,
-                form=form,
-                headers=headers,
-                cookies=cookies,
-                response=compiled_resp,
-                injected_arguments=injected_arguments,
-                before=before or self.before,
-                after=after or self.after,
-                validation_error_status=validation_error_status,
-                skip_validation=skip_validation,
-                force_resp_serialize=force_resp_serialize,
-                tags=tuple(tags),
-                security=security,
-                deprecated=deprecated,
-                path_parameter_descriptions=(
-                    dict(path_parameter_descriptions)
-                    if path_parameter_descriptions is not None
-                    else None
-                ),
-                operation_id=operation_id,
-            )
-
-            if self.backend.ASYNC:
+                validation.resp = compiled_resp
 
                 @wraps(func)
                 async def validation(*args: Any, **kwargs: Any):
