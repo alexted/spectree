@@ -114,21 +114,11 @@ class QuartPlugin(WerkzeugPlugin):
         return response, resp_validation_error
 
     async def validate(
-        self,
-        func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            func: Callable,
+            endpoint: EndpointSpec,
+            *args: Any,
+            **kwargs: Any,
     ):
         response, req_validation_error, resp_validation_error = (
             None,

@@ -39,8 +39,11 @@ from spectree.utils import (
     get_security,
     parse_comments,
     parse_name,
+    parse_params,
+    parse_request,
+    parse_resp,
     json_compatible_deepcopy,
-
+    get_request_model_hints
 )
 from spectree.endpoint import EndpointSpec, REQUEST_MODEL_ARGUMENTS
 
@@ -333,10 +336,10 @@ class SpecTree:
                 setattr(validation, name, model_key)
 
             if resp:
-                compiled_resp = resp.copy_for_model_adapter(self.model_adapter)
+                compiled_resp = resp.copy_for_model_adapter(
+                    self.model_adapter,
+                )
 
-                # Make sure that the endpoint-specific status code and data model
-                # for validation errors shows up in the response spec.
                 compiled_resp.add_model(
                     validation_error_status,
                     self.validation_error_model
@@ -351,16 +354,64 @@ class SpecTree:
                     )
                     compiled_resp._set_model_key(code, model_key)
 
-                validation.resp = compiled_resp
+            endpoint = EndpointSpec(
+                query=query,
+                json=json,
+                form=form,
+                headers=headers,
+                cookies=cookies,
+                response=compiled_resp,
+                injected_arguments=injected_arguments,
+                before=before or self.before,
+                after=after or self.after,
+                validation_error_status=validation_error_status,
+                skip_validation=skip_validation,
+                force_resp_serialize=force_resp_serialize,
+                tags=tuple(tags),
+                security=security,
+                deprecated=deprecated,
+                path_parameter_descriptions=(
+                    dict(path_parameter_descriptions)
+                    if path_parameter_descriptions is not None
+                    else None
+                ),
+                operation_id=operation_id,
+            )
 
-            if tags:
-                validation.tags = tags
+            if self.backend.ASYNC:
 
-            validation.security = security
-            validation.deprecated = deprecated
-            validation.path_parameter_descriptions = path_parameter_descriptions
-            validation.operation_id = operation_id
-            # register decorator
+                @wraps(func)
+                async def validation(*args: Any, **kwargs: Any):
+                    return await self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            else:
+
+                @wraps(func)
+                def validation(*args: Any, **kwargs: Any):
+                    return self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            for name, model_key in request_model_keys.items():
+                setattr(validation, name, model_key)
+
+            validation.resp = compiled_resp
+            validation.tags = endpoint.tags
+            validation.security = endpoint.security
+            validation.deprecated = endpoint.deprecated
+            validation.path_parameter_descriptions = (
+                endpoint.path_parameter_descriptions
+            )
+            validation.operation_id = endpoint.operation_id
+            validation._endpoint_spec = endpoint
             validation._decorator = self
 
             return validation
