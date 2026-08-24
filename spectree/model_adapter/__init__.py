@@ -6,6 +6,7 @@ from spectree.model_adapter.protocol import (
     ModelAdapter,
     ModelClass,
     ModelSpec,
+    CompiledModel,
 )
 
 
@@ -22,6 +23,7 @@ def get_msgspec_model_adapter() -> ModelAdapterType:
 
 
 __all__ = [
+    "CompiledModel",
     "ModelAdapter",
     "ModelClass",
     "ModelSpec",

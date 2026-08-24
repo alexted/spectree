@@ -23,6 +23,33 @@ BaseFileT = TypeVar("BaseFileT")
 SchemaMode: TypeAlias = Literal["validation", "serialization"]
 
 
+class CompiledModel(Protocol[ModelT]):
+    """Adapter-specific runtime representation of a ModelSpec."""
+
+    model_spec: ModelSpec
+
+    def is_instance(self, value: Any) -> bool:
+        """Return whether value is already a valid instance of this model."""
+        ...
+
+    def validate_obj(self, value: Any) -> ModelT:
+        """Validate an already decoded Python value."""
+        ...
+
+    def validate_json(self, value: bytes) -> ModelT:
+        """Validate a JSON payload."""
+        ...
+
+    def json_schema(
+        self,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
+    ) -> dict[str, Any]:
+        """Generate the JSON schema for the compiled model."""
+        ...
+
+
 class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
     """Adapter contract for validation, serialization and schema generation."""
 
@@ -91,4 +118,8 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         self,
         err: ValidationErrorT,
     ) -> Any:
+        ...
+
+    def compile(self, model: ModelSpec) -> CompiledModel[ModelT]:
+        """Compile a model specification into an adapter-specific runtime model."""
         ...
