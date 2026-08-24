@@ -39,8 +39,11 @@ from spectree.utils import (
     get_security,
     parse_comments,
     parse_name,
-    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
+    json_compatible_deepcopy, json_compatible_deepcopy, json_compatible_deepcopy,
+    json_compatible_deepcopy,
+    get_request_model_hints
 )
+from spectree.endpoint import EndpointSpec, REQUEST_MODEL_ARGUMENTS
 
 
 class SpecTree:
@@ -224,84 +227,49 @@ class SpecTree:
             validation_error_status = self.validation_error_status
 
         def decorate_validation(func: Callable):
-            # for sync framework
-            @wraps(func)
-            def sync_validate(*args: Any, **kwargs: Any):
-                return self.backend.validate(
-                    func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
-                    before or self.before,
-                    after or self.after,
-                    validation_error_status,
-                    skip_validation,
-                    force_resp_serialize,
-                    *args,
-                    **kwargs,
-                )
-
-            # for async framework
-            @wraps(func)
-            async def async_validate(*args: Any, **kwargs: Any):
-                return await self.backend.validate(
-                    func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
-                    before or self.before,
-                    after or self.after,
-                    validation_error_status,
-                    skip_validation,
-                    force_resp_serialize,
-                    *args,
-                    **kwargs,
-                )
-
-            validation: Callable = (
-                async_validate if self.backend.ASYNC else sync_validate  # type: ignore
-            )
+            resolved_annotations: Mapping[str, Any] = {}
 
             if self.config.annotations:
+                resolved_annotations = get_request_model_hints(func)
+
                 nonlocal query, json, form, headers, cookies
-                annotations = get_request_model_hints(func)
-                if skip_validation and annotations:
-                    warnings.warn(
-                        "`skip_validation` cannot be used with `annotations` enabled. "
-                        "The instances of `json`, `headers`, `cookies`, etc. read from "
-                        "the function will be `None`.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                query = annotations.get("query", query)
-                json = annotations.get("json", json)
-                form = annotations.get("form", form)
-                headers = annotations.get("headers", headers)
-                cookies = annotations.get("cookies", cookies)
 
-            metadata = FunctionDecorator()
+                query = resolved_annotations.get("query", query)
+                json = resolved_annotations.get("json", json)
+                form = resolved_annotations.get("form", form)
+                headers = resolved_annotations.get("headers", headers)
+                cookies = resolved_annotations.get("cookies", cookies)
 
-            # register
+            injected_arguments = frozenset(resolved_annotations)
+
+            request_model_keys: dict[str, str] = {}
+
             for name, model in zip(
-                ("query", "json", "form", "headers", "cookies"),
-                (query, json, form, headers, cookies),
-                strict=True,
+                    REQUEST_MODEL_ARGUMENTS,
+                    (
+                            query,
+                            json,
+                            form,
+                            headers,
+                            cookies,
+                    ),
+                    strict=True,
             ):
-                if model is not None:
-                    model_key = self._add_model(model=model, mode="validation")
-                    setattr(metadata, name, model_key)
+                if model is None:
+                    continue
+
+                request_model_keys[name] = self._add_model(
+                    model=model,
+                    mode="validation",
+                )
+
+            compiled_resp = None
 
             if resp:
-                compiled_resp = resp.copy_for_model_adapter(self.model_adapter)
+                compiled_resp = resp.copy_for_model_adapter(
+                    self.model_adapter,
+                )
 
-                # Make sure that the endpoint-specific status code and data model
-                # for validation errors shows up in the response spec.
                 compiled_resp.add_model(
                     validation_error_status,
                     self.validation_error_model
@@ -316,17 +284,66 @@ class SpecTree:
                     )
                     compiled_resp._set_model_key(code, model_key)
 
-                validation.resp = compiled_resp
+            endpoint = EndpointSpec(
+                query=query,
+                json=json,
+                form=form,
+                headers=headers,
+                cookies=cookies,
+                response=compiled_resp,
+                injected_arguments=injected_arguments,
+                before=before or self.before,
+                after=after or self.after,
+                validation_error_status=validation_error_status,
+                skip_validation=skip_validation,
+                force_resp_serialize=force_resp_serialize,
+                tags=tuple(tags),
+                security=security,
+                deprecated=deprecated,
+                path_parameter_descriptions=(
+                    dict(path_parameter_descriptions)
+                    if path_parameter_descriptions is not None
+                    else None
+                ),
+                operation_id=operation_id,
+            )
 
-            if tags:
-                metadata.tags = tags
+            if self.backend.ASYNC:
 
-            metadata.security = security
-            metadata.deprecated = deprecated
-            metadata.path_parameter_descriptions = path_parameter_descriptions
-            metadata.operation_id = operation_id
-            self._function_metadata[validation] = metadata
-            register_validated_function(validation)
+                @wraps(func)
+                async def validation(*args: Any, **kwargs: Any):
+                    return await self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            else:
+
+                @wraps(func)
+                def validation(*args: Any, **kwargs: Any):
+                    return self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            for name, model_key in request_model_keys.items():
+                setattr(validation, name, model_key)
+
+            validation.resp = compiled_resp
+            validation.tags = endpoint.tags
+            validation.security = endpoint.security
+            validation.deprecated = endpoint.deprecated
+            validation.path_parameter_descriptions = (
+                endpoint.path_parameter_descriptions
+            )
+            validation.operation_id = endpoint.operation_id
+            validation._endpoint_spec = endpoint
+            validation._decorator = self
+
             return validation
 
         return decorate_validation
