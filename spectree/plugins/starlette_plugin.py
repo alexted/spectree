@@ -3,14 +3,15 @@ from collections import namedtuple
 from contextvars import ContextVar
 from functools import partial
 from json import JSONDecodeError
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from starlette.convertors import CONVERTOR_TYPES
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import compile_path
 
-from spectree._types import HookHandler, ModelAdapterType
+from spectree._types import ModelAdapterType
+from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import (
     BasePlugin,
@@ -18,8 +19,7 @@ from spectree.plugins.base import (
     RawResponsePayload,
     validate_response,
 )
-from spectree.response import Response
-from spectree.utils import cached_type_hints, get_multidict_items_starlette
+from spectree.utils import get_multidict_items_starlette
 
 METHODS = {"get", "post", "put", "patch", "delete"}
 Route = namedtuple("Route", ["path", "methods", "func"])
@@ -112,24 +112,16 @@ class StarlettePlugin(BasePlugin):
         )
 
     async def validate(
-        self,
-        func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            func: Callable,
+            endpoint: EndpointSpec,
+            *args: Any,
+            **kwargs: Any,
     ):
         async def call_with_model_adapter() -> Any:
-            model_adapter_token = _active_model_adapter.set(self.model_adapter)
+            model_adapter_token = _active_model_adapter.set(
+                self.model_adapter
+            )
             try:
                 if inspect.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
@@ -143,60 +135,79 @@ class StarlettePlugin(BasePlugin):
             instance, request = args[:2]
 
         response = None
-        req_validation_error = resp_validation_error = json_decode_error = None
+        req_validation_error = None
+        resp_validation_error = None
+        json_decode_error = None
 
-        if not skip_validation:
+        if not endpoint.skip_validation:
             try:
                 await self.request_validation(
-                    request, query, json, form, headers, cookies
+                    request,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
                 )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
                 response = JSONResponse(
                     self.model_adapter.validation_errors(err),
-                    validation_error_status,
+                    endpoint.validation_error_status,
                 )
             except JSONDecodeError as err:
                 json_decode_error = err
                 self.logger.info(
                     "%s Validation Error",
-                    validation_error_status,
+                    endpoint.validation_error_status,
                     extra={"spectree_json_decode_error": str(err)},
                 )
                 response = JSONResponse(
-                    {"error_msg": str(err)}, validation_error_status
+                    {"error_msg": str(err)},
+                    endpoint.validation_error_status,
                 )
 
-        before(request, response, req_validation_error, instance, self.model_adapter)
+        endpoint.before(
+            request,
+            response,
+            req_validation_error,
+            instance,
+            self.model_adapter,
+        )
+
         if req_validation_error or json_decode_error:
             return response
 
-        if self.config.annotations:
-            annotations = cached_type_hints(func)
-            for name in ("query", "json", "form", "headers", "cookies"):
-                if annotations.get(name):
-                    kwargs[name] = getattr(
-                        getattr(request, "context", None), name, None
-                    )
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                getattr(request, "context", None),
+                name,
+                None,
+            )
 
         response = await call_with_model_adapter()
 
         if (
-            not skip_validation
-            and resp
-            and response
-            and not (
+                not endpoint.skip_validation
+                and endpoint.resp
+                and response
+                and not (
                 isinstance(response, JSONResponse)
                 and hasattr(response, "_model_class")
-                and response._model_class == resp.find_model(response.status_code)
-            )
+                and response._model_class
+                == endpoint.resp.find_model(response.status_code)
+        )
         ):
             try:
                 response_validation_result = validate_response(
                     model_adapter=self.model_adapter,
-                    validation_model=resp.find_model(response.status_code),
-                    response_payload=RawResponsePayload(payload=response.body),
-                    force_serialize=force_resp_serialize,
+                    validation_model=endpoint.resp.find_model(
+                        response.status_code
+                    ),
+                    response_payload=RawResponsePayload(
+                        payload=response.body
+                    ),
+                    force_serialize=endpoint.force_resp_serialize,
                 )
             except self.model_adapter.validation_error as err:
                 response = JSONResponse(
@@ -205,11 +216,19 @@ class StarlettePlugin(BasePlugin):
                 )
                 resp_validation_error = err
             else:
-                # replace the body of the response if it was serialized during validation
-                if isinstance(response_validation_result.payload, bytes):
+                if isinstance(
+                        response_validation_result.payload,
+                        bytes,
+                ):
                     response.body = response_validation_result.payload
 
-        after(request, response, resp_validation_error, instance, self.model_adapter)
+        endpoint.after(
+            request,
+            response,
+            resp_validation_error,
+            instance,
+            self.model_adapter,
+        )
 
         return response
 
