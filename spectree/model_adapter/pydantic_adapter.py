@@ -32,6 +32,63 @@ class BaseFile:
         return value
 
 
+class PydanticCompiledModel:
+    """Compiled Pydantic runtime representation of a ModelSpec."""
+
+    def __init__(self, model_spec: ModelSpec) -> None:
+        self.model_spec = model_spec
+        self._is_base_model = (
+            isinstance(model_spec, type)
+            and issubclass(model_spec, BaseModel)
+        )
+
+        if self._is_base_model:
+            self._type_adapter = None
+        else:
+            self._type_adapter = TypeAdapter(model_spec)
+
+    def is_instance(self, value: Any) -> bool:
+        if not self._is_base_model:
+            return False
+
+        return isinstance(value, self.model_spec)
+
+    def validate_obj(self, value: Any) -> Any:
+        if self._is_base_model:
+            return self.model_spec.model_validate(value)
+
+        return self._type_adapter.validate_python(value)
+
+    def validate_json(self, value: bytes) -> Any:
+        if self._is_base_model:
+            return self.model_spec.model_validate_json(value)
+
+        return self._type_adapter.validate_json(value)
+
+    def json_schema(
+        self,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
+    ) -> dict[str, Any]:
+        if self._is_base_model:
+            return self.model_spec.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
+            )
+
+        if self.model_spec is ValidationError:
+            return ValidationErrorType.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
+            )
+
+        return self._type_adapter.json_schema(
+            ref_template=ref_template,
+            mode=mode,
+        )
+
+
 class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     """`pydantic` model adapter."""
 
@@ -39,14 +96,16 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     basefile = BaseFile
 
     def __init__(self) -> None:
-        self._type_adapters: dict[type[Any], TypeAdapter[Any]] = {}
+        self._compiled_models: dict[ModelSpec, PydanticCompiledModel] = {}
 
-    def _type_adapter(self, value: type[Any]) -> TypeAdapter[Any]:
-        adapter = self._type_adapters.get(value)
-        if adapter is None:
-            adapter = TypeAdapter(value)
-            self._type_adapters[value] = adapter
-        return adapter
+    def compile(self, model: ModelSpec) -> PydanticCompiledModel:
+        compiled = self._compiled_models.get(model)
+
+        if compiled is None:
+            compiled = PydanticCompiledModel(model)
+            self._compiled_models[model] = compiled
+
+        return compiled
 
     def is_model_type(self, value: ModelSpec) -> bool:
         return (
@@ -55,8 +114,12 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
             or is_dataclass(value)
         )
 
-    def is_model_instance(self, value: Any, model) -> bool:
-        return isinstance(value, model) and issubclass(model, BaseModel)
+    def is_model_instance(
+            self,
+            value: Any,
+            model: ModelSpec,
+    ) -> bool:
+        return self.compile(model).is_instance(value)
 
     def is_partial_model_instance(self, value: Any) -> bool:
         if not value:
@@ -73,15 +136,19 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
             return any(self.is_partial_model_instance(item) for item in value)
         return False
 
-    def validate_obj(self, model: ModelSpec, value: Any) -> Any:
-        if issubclass(model, BaseModel):
-            return model.model_validate(value)
-        return self._type_adapter(model).validate_python(value)
+    def validate_obj(
+            self,
+            model: ModelSpec,
+            value: Any,
+    ) -> Any:
+        return self.compile(model).validate_obj(value)
 
-    def validate_json(self, model: ModelSpec, value: bytes) -> Any:
-        if issubclass(model, BaseModel):
-            return model.model_validate_json(value)
-        return self._type_adapter(model).validate_json(value)
+    def validate_json(
+            self,
+            model: ModelSpec,
+            value: bytes,
+    ) -> Any:
+        return self.compile(model).validate_json(value)
 
     def dump_json(self, value: Any) -> bytes:
         instance = value
@@ -110,20 +177,15 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         )
 
     def json_schema(
-        self,
-        model: ModelSpec,
-        *,
-        ref_template: str,
-        mode: SchemaMode = "validation",
+            self,
+            model: ModelSpec,
+            *,
+            ref_template: str,
+            mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        if issubclass(model, BaseModel):
-            return model.model_json_schema(ref_template=ref_template, mode=mode)
-        elif model is ValidationError:
-            return ValidationErrorType.model_json_schema(
-                ref_template=ref_template, mode=mode
-            )
-        return self._type_adapter(model).json_schema(
-            ref_template=ref_template, mode=mode
+        return self.compile(model).json_schema(
+            ref_template=ref_template,
+            mode=mode,
         )
 
     def validation_errors(self, err: ValidationError) -> Any:
