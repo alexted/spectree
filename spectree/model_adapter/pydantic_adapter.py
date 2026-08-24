@@ -249,6 +249,11 @@ class PydanticCompiledModel:
             mode=mode,
         )
 
+    def dump_json(self, value: Any) -> bytes:
+        if self._is_base_model:
+            return self.model_spec.model_dump_json(value).encode("utf-8")
+
+        return self._type_adapter.dump_json(value)
 
 class PydanticModelAdapter(
     ModelAdapter[Any, ValidationError, type[BaseFile]],
