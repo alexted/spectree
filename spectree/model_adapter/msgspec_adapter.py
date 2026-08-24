@@ -224,11 +224,12 @@ class MsgspecModelAdapter(
 ):
     """Msgspec model adapter."""
 
-    validation_error = msgspec.ValidationError
-    basefile = BaseFile
+    def __init__(self, model_spec: ModelSpec) -> None:
+        self.model_spec = model_spec
 
-    def __init__(self) -> None:
-        self.encoder = msgspec.json.Encoder()
+    def is_instance(self, value: Any) -> bool:
+        model = self.model_spec
+        origin = get_origin(model)
         self._compiled_models: dict[ModelSpec, MsgspecCompiledModel] = {}
 
     def compile(
@@ -296,16 +297,16 @@ class MsgspecModelAdapter(
         return False
 
     def validate_obj(
-        self,
-        model: ModelSpec,
-        value: Any,
+            self,
+            model: ModelSpec,
+            value: Any,
     ) -> Any:
         return self.compile(model).validate_obj(value)
 
     def validate_json(
-        self,
-        model: ModelSpec,
-        value: bytes,
+            self,
+            model: ModelSpec,
+            value: bytes,
     ) -> Any:
         return self.compile(model).validate_json(value)
 
@@ -343,11 +344,11 @@ class MsgspecModelAdapter(
         )
 
     def json_schema(
-        self,
-        model: ModelSpec,
-        *,
-        ref_template: str,
-        mode: SchemaMode = "validation",
+            self,
+            model: ModelSpec,
+            *,
+            ref_template: str,
+            mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
         return self.compile(model).json_schema(
             ref_template=ref_template,
