@@ -345,16 +345,16 @@ class PydanticModelAdapter(
         return False
 
     def validate_obj(
-        self,
-        model: ModelSpec,
-        value: Any,
+            self,
+            model: ModelSpec,
+            value: Any,
     ) -> Any:
         return self.compile(model).validate_obj(value)
 
     def validate_json(
-        self,
-        model: ModelSpec,
-        value: bytes,
+            self,
+            model: ModelSpec,
+            value: bytes,
     ) -> Any:
         return self.compile(model).validate_json(value)
 
@@ -393,11 +393,11 @@ class PydanticModelAdapter(
         )
 
     def json_schema(
-        self,
-        model: ModelSpec,
-        *,
-        ref_template: str,
-        mode: SchemaMode = "validation",
+            self,
+            model: ModelSpec,
+            *,
+            ref_template: str,
+            mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
         return self.compile(model).json_schema(
             ref_template=ref_template,
