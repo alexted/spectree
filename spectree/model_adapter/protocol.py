@@ -28,6 +28,9 @@ class CompiledModel(Protocol[ModelT]):
         """Validate a JSON payload."""
         ...
 
+    def dump_json(self, value: Any) -> bytes:
+        ...
+
     def json_schema(
         self,
         *,
