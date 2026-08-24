@@ -166,3 +166,63 @@ def test_model_spec_accepts_generic_alias():
     model: ModelSpec = list[DemoModel]
     assert model == list[DemoModel]
 
+
+def test_compiled_model(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    compiled = adapter.compile(model)
+
+    instance = compiled.validate_obj({"user_id": "1"})
+
+    assert model_case.dump_python(instance) == {"user_id": 1}
+    assert compiled.is_instance(instance) is True
+    assert compiled.is_instance({"user_id": 1}) is False
+
+
+def test_compiled_model_json(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    compiled = adapter.compile(model)
+
+    instance = compiled.validate_json(b'{"user_id": 1}')
+
+    assert model_case.dump_python(instance) == {"user_id": 1}
+
+
+def test_compiled_model_schema(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    compiled = adapter.compile(model)
+
+    schema = compiled.json_schema(
+        ref_template="#/components/schemas/{model}",
+    )
+
+    assert schema["type"] == "object"
+    assert schema["properties"]["user_id"]["type"] == "integer"
+
+
+def test_compiled_generic_model(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(
+        list[SimpleModel],
+        name="Users",
+    )
+
+    compiled = adapter.compile(model)
+
+    instance = compiled.validate_obj(
+        [
+            {"user_id": 1},
+            {"user_id": 2},
+        ]
+    )
+
+    assert model_case.dump_python(instance) == [
+        {"user_id": 1},
+        {"user_id": 2},
+    ]
+

@@ -2,7 +2,7 @@ from functools import cache
 from importlib import import_module
 
 from spectree._types import ModelAdapterType
-from spectree.model_adapter.protocol import ModelAdapter, ModelSpec
+from spectree.model_adapter.protocol import CompiledModel, ModelAdapter, ModelSpec
 
 
 @cache
@@ -18,6 +18,7 @@ def get_msgspec_model_adapter() -> ModelAdapterType:
 
 
 __all__ = [
+    "CompiledModel",
     "ModelAdapter",
     "ModelSpec",
     "get_msgspec_model_adapter",

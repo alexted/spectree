@@ -62,3 +62,38 @@ def test_pydantic_model_spec_types(
 ):
     assert model_adapter.is_model_type(DemoModel)
     assert model_adapter.is_model_type(DemoDataclass)
+
+
+@pytest.mark.pydantic
+def test_pydantic_compilation_is_cached():
+    adapter = get_pydantic_model_adapter()
+
+    model = adapter.make_root_model(
+        list[int],
+        name="Numbers",
+    )
+
+    first = adapter.compile(model)
+    second = adapter.compile(model)
+
+    assert first is second
+
+
+@pytest.mark.pydantic
+def test_pydantic_compiled_generic_model_is_not_direct_instance():
+    adapter = get_pydantic_model_adapter()
+
+    model = list[int]
+    compiled = adapter.compile(model)
+
+    assert compiled.is_instance([1, 2, 3]) is False
+
+
+@pytest.mark.pydantic
+def test_pydantic_compiled_generic_model_validates():
+    adapter = get_pydantic_model_adapter()
+
+    model = list[int]
+    compiled = adapter.compile(model)
+
+    assert compiled.validate_obj(["1", "2"]) == [1, 2]

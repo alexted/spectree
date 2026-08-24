@@ -254,3 +254,15 @@ def test_msgspec_annotated_model_spec():
 
     assert ADAPTER.is_model_type(model)
 
+
+def test_compiled_annotated_model(model_case):
+    if model_case.name != "msgspec":
+        pytest.skip("msgspec-specific")
+
+    model = Annotated[list[int], msgspec.Meta(title="Numbers")]
+
+    compiled = model_case.adapter.compile(model)
+
+    instance = compiled.validate_obj([1, 2, 3])
+
+    assert instance == [1, 2, 3]
