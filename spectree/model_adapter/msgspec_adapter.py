@@ -41,14 +41,7 @@ class MsgspecCompiledModel:
         model = self.model_spec
         origin = get_origin(model)
 
-    def is_model_type(self, value: ModelSpec) -> bool:
-        """All kinds of types are treated the same."""
-        return True
-
-    def is_model_instance(self, value: Any, model: ModelSpec) -> bool:
-        # msgspec accepts generic aliases like list[Item] and Annotated[...] as
-        # validation models, but they cannot be passed to isinstance() directly.
-        while (origin := get_origin(model)) is Annotated:
+        while origin is Annotated:
             model = get_args(model)[0]
             origin = get_origin(model)
 

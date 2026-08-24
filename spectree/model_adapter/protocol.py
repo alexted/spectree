@@ -3,6 +3,7 @@ from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 # ModelSpec is not "any value accepted by Spectree".
 # It is a type expression whose support is determined by the selected adapter.
 ModelSpec: TypeAlias = Any
+
 ModelT = TypeVar("ModelT")
 ValidationErrorT = TypeVar("ValidationErrorT", bound=Exception)
 BaseFileT = TypeVar("BaseFileT")
