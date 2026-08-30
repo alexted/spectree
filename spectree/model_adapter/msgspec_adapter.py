@@ -1,4 +1,5 @@
 import re
+from dataclasses import is_dataclass
 from typing import Annotated, Any, TypeAlias, get_args, get_origin
 
 import msgspec
@@ -53,11 +54,16 @@ class MsgspecCompiledModel:
                 and all(isinstance(item, item_model) for item in value)
             )
 
-        return (
-            isinstance(model, type)
-            and issubclass(model, msgspec.Struct)
-            and isinstance(value, model)
-        )
+        if not isinstance(model, type):
+            return False
+
+        if issubclass(model, msgspec.Struct):
+            return isinstance(value, model)
+
+        if is_dataclass(model):
+            return isinstance(value, model)
+
+        return False
 
     def validate_obj(self, value: Any) -> Any:
         return msgspec.convert(
@@ -129,16 +135,23 @@ class MsgspecModelAdapter(ModelAdapter[Any, msgspec.ValidationError, BaseFile]):
     def is_partial_model_instance(self, value: Any) -> bool:
         if not value:
             return False
-        if isinstance(value, msgspec.Struct):
+
+        if isinstance(value, msgspec.Struct) or is_dataclass(value):
             return True
+
         if isinstance(value, dict):
             return any(
                 self.is_partial_model_instance(key)
                 or self.is_partial_model_instance(item)
                 for key, item in value.items()
             )
+
         if isinstance(value, (list, tuple)):
-            return any(self.is_partial_model_instance(item) for item in value)
+            return any(
+                self.is_partial_model_instance(item)
+                for item in value
+            )
+
         return False
 
     def validate_obj(

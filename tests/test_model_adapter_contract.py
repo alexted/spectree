@@ -32,6 +32,23 @@ def test_validate_obj_and_is_model_instance(model_case):
     assert adapter.is_model_instance(simple_model, simple_model) is False
 
 
+def test_stdlib_dataclass_is_a_model_instance(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    instance = model_case.validate_obj(
+        model,
+        {"user_id": "1"},
+    )
+
+    assert isinstance(instance, SimpleModel)
+    assert adapter.is_model_instance(instance, model) is True
+    assert adapter.is_model_instance(
+        {"user_id": 1},
+        model,
+    ) is False
+
+
 def test_root_model_instances(model_case):
     adapter = model_case.adapter
     dummy_root_model = model_case.get_model(list[int], name="DummyRootModel")
