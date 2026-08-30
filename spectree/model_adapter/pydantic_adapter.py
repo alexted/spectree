@@ -37,9 +37,14 @@ class PydanticCompiledModel:
 
     def __init__(self, model_spec: ModelSpec) -> None:
         self.model_spec = model_spec
+
         self._is_base_model = (
             isinstance(model_spec, type)
             and issubclass(model_spec, BaseModel)
+        )
+        self._is_dataclass = (
+            isinstance(model_spec, type)
+            and is_dataclass(model_spec)
         )
 
         if self._is_base_model:
@@ -48,7 +53,7 @@ class PydanticCompiledModel:
             self._type_adapter = TypeAdapter(model_spec)
 
     def is_instance(self, value: Any) -> bool:
-        if not self._is_base_model:
+        if not (self._is_base_model or self._is_dataclass):
             return False
 
         return isinstance(value, self.model_spec)
@@ -135,16 +140,23 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     def is_partial_model_instance(self, value: Any) -> bool:
         if not value:
             return False
-        if isinstance(value, BaseModel):
+
+        if isinstance(value, BaseModel) or is_dataclass(value):
             return True
+
         if isinstance(value, dict):
             return any(
                 self.is_partial_model_instance(key)
                 or self.is_partial_model_instance(item)
                 for key, item in value.items()
             )
+
         if isinstance(value, (list, tuple)):
-            return any(self.is_partial_model_instance(item) for item in value)
+            return any(
+                self.is_partial_model_instance(item)
+                for item in value
+            )
+
         return False
 
     def validate_obj(
