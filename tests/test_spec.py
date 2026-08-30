@@ -616,33 +616,6 @@ def test_endpoint_spec_from_annotations():
     }
 
 
-def test_endpoint_spec_from_annotations():
-    api = SpecTree()
-
-    class Query:
-        pass
-
-    class Body:
-        pass
-
-    @api.validate()
-    def endpoint(query: Query, json: Body):
-        return None
-
-    endpoint_spec = endpoint._endpoint_spec
-
-    assert endpoint_spec.query is Query
-    assert endpoint_spec.json is Body
-    assert endpoint_spec.form is None
-    assert endpoint_spec.headers is None
-    assert endpoint_spec.cookies is None
-
-    assert endpoint_spec.injected_arguments == {
-        "query",
-        "json",
-    }
-
-
 def test_runtime_does_not_resolve_unrelated_annotations():
     app = Flask(__name__)
     api = SpecTree("flask")
