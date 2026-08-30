@@ -4,7 +4,7 @@ from typing import Annotated, Any, TypeAlias, get_args, get_origin
 
 import msgspec
 
-from spectree.model_adapter.protocol import ModelAdapter, SchemaMode
+from spectree.model_adapter.protocol import ModelAdapter, SchemaMode, ModelSpec
 from spectree.models import ValidationErrorElement
 
 _ERROR_PATH_RE = re.compile(r" - at `(?P<path>.+)`$")
@@ -40,11 +40,11 @@ class MsgspecModelAdapter(ModelAdapter[Any, msgspec.ValidationError, BaseFile]):
     def __init__(self) -> None:
         self.encoder = msgspec.json.Encoder()
 
-    def is_model_type(self, value: type) -> bool:
+    def is_model_type(self, value: ModelSpec) -> bool:
         """All kinds of types are treated the same."""
         return True
 
-    def is_model_instance(self, value: Any, model) -> bool:
+    def is_model_instance(self, value: Any, model: ModelSpec) -> bool:
         # msgspec accepts generic aliases like list[Item] and Annotated[...] as
         # validation models, but they cannot be passed to isinstance() directly.
         while (origin := get_origin(model)) is Annotated:
@@ -81,10 +81,10 @@ class MsgspecModelAdapter(ModelAdapter[Any, msgspec.ValidationError, BaseFile]):
             return any(self.is_partial_model_instance(item) for item in value)
         return False
 
-    def validate_obj(self, model: type[Any], value: Any) -> Any:
+    def validate_obj(self, model: ModelSpec, value: Any) -> Any:
         return msgspec.convert(value, type=model, strict=False)
 
-    def validate_json(self, model: type[Any], value: bytes) -> Any:
+    def validate_json(self, model: ModelSpec, value: bytes) -> Any:
         return msgspec.json.decode(value, type=model, strict=False)
 
     def dump_json(self, value: Any) -> bytes:
@@ -92,11 +92,11 @@ class MsgspecModelAdapter(ModelAdapter[Any, msgspec.ValidationError, BaseFile]):
 
     def make_root_model(
         self,
-        root_type: type[Any],
+        root_type: ModelSpec,
         *,
         name: str | None = None,
         module: str | None = None,
-    ) -> type[msgspec.Struct]:
+    ) -> ModelSpec:
         """
         All the types are treated the same in `msgspec`.
 
@@ -106,13 +106,13 @@ class MsgspecModelAdapter(ModelAdapter[Any, msgspec.ValidationError, BaseFile]):
         T = Annotated[root_type, msgspec.Meta(title=model_name)]  # type: ignore
         return T  # type: ignore
 
-    def make_list_model(self, model: type) -> type:
+    def make_list_model(self, model: ModelSpec) -> ModelSpec:
         list_model = self.make_root_model(list[model], name=f"{model.__name__}List")  # type: ignore
         return list_model
 
     def json_schema(
         self,
-        model: type[Any],
+        model: ModelSpec,
         *,
         ref_template: str,
         mode: SchemaMode = "validation",

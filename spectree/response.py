@@ -5,7 +5,7 @@ from http import HTTPStatus
 from typing import Any, TypeAlias
 
 from spectree._types import ModelAdapterType, NamingStrategy
-from spectree.model_adapter import ModelClass
+from spectree.model_adapter import ModelSpec
 from spectree.utils import get_model_key, parse_code
 
 # according to https://tools.ietf.org/html/rfc2616#section-10
@@ -17,7 +17,7 @@ DEFAULT_CODE_DESC: dict[str, str] = dict(
 
 # Python's typing cannot precisely express runtime type expressions such as
 # `list[User]` here without relying on non-portable internals.
-ResponseModelSpec: TypeAlias = object
+ResponseModelSpec: TypeAlias = ModelSpec
 ResponseModelConfig: TypeAlias = (
     ResponseModelSpec | tuple[ResponseModelSpec | None, str] | None
 )
@@ -70,8 +70,9 @@ class Response:
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             self.codes.append(code)
 
-        self.code_models: dict[str, ModelClass] = {}
+        self.code_models: dict[str, ModelSpec] = {}
         self.code_descriptions: dict[str, str | None] = {}
+        self._model_keys: dict[str, str] = {}
         self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
@@ -128,7 +129,7 @@ class Response:
 
     def _build_model(
         self, raw_model: Any, model_adapter: ModelAdapterType
-    ) -> ModelClass:
+    ) -> ModelSpec:
         model = raw_model
         origin_type = getattr(model, "__origin__", None)
         if origin_type is list:
@@ -136,8 +137,8 @@ class Response:
         assert model_adapter.is_model_type(model), f"invalid response model: {model}"
         return model
 
-    def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelClass]:
-        code_models: dict[str, ModelClass] = {}
+    def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelSpec]:
+        code_models: dict[str, ModelSpec] = {}
         for code, raw_model in self._raw_code_models.items():
             code_models[code] = self._build_model(raw_model, model_adapter)
         return code_models
@@ -177,7 +178,7 @@ class Response:
         """
         return bool(self.code_models)
 
-    def find_model(self, code: int) -> ModelClass | None:
+    def find_model(self, code: int) -> Optional[ModelSpec]:
         """
         :param code: ``r'\\d{3}'``
         """
@@ -192,7 +193,7 @@ class Response:
         return self.code_descriptions.get(code) or DEFAULT_CODE_DESC[code]
 
     @property
-    def models(self) -> Iterable[ModelClass]:
+    def models(self) -> Iterable[ModelSpec]:
         """
         :returns:  dict_values -- all the models in this response
         """
