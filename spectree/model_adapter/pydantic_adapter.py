@@ -88,6 +88,11 @@ class PydanticCompiledModel:
             mode=mode,
         )
 
+    def dump_json(self, value: Any) -> bytes:
+        if self._is_base_model:
+            return self.model_spec.model_dump_json(value).encode("utf-8")
+
+        return self._type_adapter.dump_json(value)
 
 class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     """`pydantic` model adapter."""
@@ -108,11 +113,17 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         return compiled
 
     def is_model_type(self, value: ModelSpec) -> bool:
-        return (
-            value is ValidationError
-            or issubclass(value, BaseModel)
-            or is_dataclass(value)
-        )
+        if value is ValidationError:
+            return True
+
+        if not isinstance(value, type):
+            try:
+                TypeAdapter(value)
+            except (TypeError, ValueError):
+                return False
+            return True
+
+        return issubclass(value, BaseModel) or is_dataclass(value)
 
     def is_model_instance(
             self,
@@ -151,12 +162,10 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         return self.compile(model).validate_json(value)
 
     def dump_json(self, value: Any) -> bytes:
-        instance = value
         if not isinstance(value, BaseModel):
-            instance = self.validate_obj(type(instance), instance)
-        if isinstance(instance, BaseModel):
-            return instance.model_dump_json().encode("utf-8")
-        return self._type_adapter(type(instance)).dump_json(instance)
+            value = self.validate_obj(type(value), value)
+
+        return self.compile(type(value)).dump_json(value)
 
     def make_root_model(
         self,

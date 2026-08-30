@@ -12,10 +12,10 @@ from typing import (
     Union,
 )
 
-from spectree._types import HookHandler, JsonType, ModelAdapterType
+from spectree._types import JsonType, ModelAdapterType
 from spectree.config import Configuration
+from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
-from spectree.response import Response
 
 if TYPE_CHECKING:
     # to avoid cyclic import
@@ -59,24 +59,15 @@ class BasePlugin(Generic[BackendRoute]):
         raise NotImplementedError
 
     def validate(
-        self,
-        func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            func: Callable,
+            endpoint: EndpointSpec,
+            *args: Any,
+            **kwargs: Any,
     ):
         """
-        validate the request and response
+        Validate request/response and invoke the endpoint using
+        the precomputed endpoint contract.
         """
         raise NotImplementedError
 

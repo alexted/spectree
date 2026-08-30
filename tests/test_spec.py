@@ -587,3 +587,113 @@ def test_response_can_be_reused_by_different_model_adapters(
     assert response.model_adapter is None
     assert compiled.model_adapter is pydantic_api.model_adapter
     assert response.code_models == {}
+
+
+def test_endpoint_spec_from_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    class Body:
+        pass
+
+    @api.validate()
+    def endpoint(query: Query, json: Body):
+        return None
+
+    endpoint_spec = endpoint._endpoint_spec
+
+    assert endpoint_spec.query is Query
+    assert endpoint_spec.json is Body
+    assert endpoint_spec.form is None
+    assert endpoint_spec.headers is None
+    assert endpoint_spec.cookies is None
+
+    assert endpoint_spec.injected_arguments == {
+        "query",
+        "json",
+    }
+
+
+def test_endpoint_spec_from_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    class Body:
+        pass
+
+    @api.validate()
+    def endpoint(query: Query, json: Body):
+        return None
+
+    endpoint_spec = endpoint._endpoint_spec
+
+    assert endpoint_spec.query is Query
+    assert endpoint_spec.json is Body
+    assert endpoint_spec.form is None
+    assert endpoint_spec.headers is None
+    assert endpoint_spec.cookies is None
+
+    assert endpoint_spec.injected_arguments == {
+        "query",
+        "json",
+    }
+
+
+def test_runtime_does_not_resolve_unrelated_annotations():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    class DemoModel:
+        pass
+
+    def endpoint(
+        json: DemoModel,
+        dependency: "CompletelyNonExistentType",
+    ):
+        return {"ok": True}
+
+    decorated = api.validate()(endpoint)
+
+    app.add_url_rule(
+        "/runtime-annotation",
+        view_func=decorated,
+        methods=["POST"],
+    )
+
+    api.register(app)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/runtime-annotation",
+            json={},
+        )
+
+    assert response.status_code != 500
+
+def test_runtime_ignores_unresolvable_return_annotation():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    decorated = api.validate()(type_checking_view_func)
+
+    app.add_url_rule(
+        "/type-checking-runtime",
+        view_func=decorated,
+        methods=["POST"],
+    )
+
+    api.register(app)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/type-checking-runtime",
+            json={},
+        )
+
+    assert response.status_code != 500
+
+

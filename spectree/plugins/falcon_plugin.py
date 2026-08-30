@@ -26,11 +26,10 @@ from falcon.asgi.reader import BufferedReader as ASGIBufferedReader
 from falcon.routing.compiled import _FIELD_PATTERN as FALCON_FIELD_PATTERN
 from falcon.util.reader import DEFAULT_CHUNK_SIZE, BufferedReader
 
-from spectree._types import HookHandler
 from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import BasePlugin, validate_response
 from spectree.response import Response
-from spectree.utils import cached_type_hints
+from spectree.endpoint import EndpointSpec
 
 
 class StreamWrapper:
@@ -298,50 +297,69 @@ class FalconPlugin(BasePlugin):
         return resp_validation_error
 
     def validate(
-        self,
-        func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            func: Callable,
+            endpoint: EndpointSpec,
+            *args: Any,
+            **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
-        req_validation_error = None
-        if not skip_validation:
-            try:
-                self.validate_request(_req, query, json, form, headers, cookies)
 
+        req_validation_error = None
+
+        if not endpoint.skip_validation:
+            try:
+                self.validate_request(
+                    _req,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
+                )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
-                _resp.status = f"{validation_error_status} Validation Error"
+                _resp.status = (
+                    f"{endpoint.validation_error_status} Validation Error"
+                )
                 _resp.media = self.model_adapter.validation_errors(err)
 
-        before(_req, _resp, req_validation_error, _self, self.model_adapter)
+        endpoint.before(
+            _req,
+            _resp,
+            req_validation_error,
+            _self,
+            self.model_adapter,
+        )
+
         if req_validation_error:
             return None
 
-        if self.config.annotations:
-            annotations = cached_type_hints(func)
-            for name in ("query", "json", "form", "headers", "cookies"):
-                if annotations.get(name):
-                    kwargs[name] = getattr(_req.context, name, None)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                _req.context,
+                name,
+                None,
+            )
 
         result = func(*args, **kwargs)
 
         resp_validation_error = self.validate_response(
-            _resp, resp, skip_validation, force_resp_serialize
+            _resp,
+            endpoint.resp,
+            endpoint.skip_validation,
+            endpoint.force_resp_serialize,
         )
-        after(_req, _resp, resp_validation_error, _self, self.model_adapter)
+
+        endpoint.after(
+            _req,
+            _resp,
+            resp_validation_error,
+            _self,
+            self.model_adapter,
+        )
+
         # `falcon` doesn't use this return value. However, some users may have
         # their own processing logics that depend on this return value.
         return result
@@ -394,45 +412,51 @@ class FalconAsgiPlugin(FalconPlugin):
             req.context.form = self.model_adapter.validate_obj(form, req_form)
 
     async def validate(
-        self,
-        func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            func: Callable,
+            endpoint: EndpointSpec,
+            *args: Any,
+            **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
+
         req_validation_error = None
-        if not skip_validation:
+
+        if not endpoint.skip_validation:
             try:
                 await self.validate_async_request(
-                    _req, query, json, form, headers, cookies
+                    _req,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
                 )
-
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
-                _resp.status = f"{validation_error_status} Validation Error"
+                _resp.status = (
+                    f"{endpoint.validation_error_status} Validation Error"
+                )
                 _resp.media = self.model_adapter.validation_errors(err)
 
-        before(_req, _resp, req_validation_error, _self, self.model_adapter)
+        endpoint.before(
+            _req,
+            _resp,
+            req_validation_error,
+            _self,
+            self.model_adapter,
+        )
+
         if req_validation_error:
             return None
 
-        if self.config.annotations:
-            annotations = cached_type_hints(func)
-            for name in ("query", "json", "form", "headers", "cookies"):
-                if annotations.get(name):
-                    kwargs[name] = getattr(_req.context, name, None)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                _req.context,
+                name,
+                None,
+            )
 
         result = (
             await func(*args, **kwargs)
@@ -441,7 +465,18 @@ class FalconAsgiPlugin(FalconPlugin):
         )
 
         resp_validation_error = self.validate_response(
-            _resp, resp, skip_validation, force_resp_serialize
+            _resp,
+            endpoint.resp,
+            endpoint.skip_validation,
+            endpoint.force_resp_serialize,
         )
-        after(_req, _resp, resp_validation_error, _self, self.model_adapter)
+
+        endpoint.after(
+            _req,
+            _resp,
+            resp_validation_error,
+            _self,
+            self.model_adapter,
+        )
+
         return result
