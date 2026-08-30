@@ -48,10 +48,13 @@ class PydanticCompiledModel:
             self._type_adapter = TypeAdapter(model_spec)
 
     def is_instance(self, value: Any) -> bool:
-        if not self._is_base_model:
-            return False
+        if self._is_base_model:
+            return isinstance(value, self.model_spec)
 
-        return isinstance(value, self.model_spec)
+        if isinstance(self.model_spec, type) and is_dataclass(self.model_spec):
+            return isinstance(value, self.model_spec)
+
+        return False
 
     def validate_obj(self, value: Any) -> Any:
         if self._is_base_model:

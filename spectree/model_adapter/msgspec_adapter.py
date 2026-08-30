@@ -1,5 +1,5 @@
 import re
-from dataclasses import is_dataclass
+from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, TypeAlias, get_args, get_origin
 
 import msgspec
