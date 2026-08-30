@@ -146,6 +146,12 @@ class Child:
 
 
 @dataclass
+class Headers:
+    token: str
+
+
+@dataclass
 class NestedDataclass:
     child: SimpleModel
     tags: list[int] = field(default_factory=list)
+

@@ -190,7 +190,12 @@ class PydanticCompiledModel:
 
     def is_instance(self, value: Any) -> bool:
         if self.model_spec is ValidationError:
-            return isinstance(value, ValidationError)
+            return isinstance(value, self.model_spec)
+
+        if isinstance(self.model_spec, type) and is_dataclass(self.model_spec):
+            return isinstance(value, self.model_spec)
+
+        return isinstance(value, ValidationError)
 
         if self._is_base_model or self._is_dataclass:
             return isinstance(value, self.model_spec)
