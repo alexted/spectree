@@ -7,6 +7,7 @@ from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import Context, validate_response
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
+from spectree.request_data import RequestData
 from spectree.response import Response
 from spectree.utils import get_multidict_items
 
@@ -22,31 +23,33 @@ class FlaskPlugin(WerkzeugPlugin):
     def is_blueprint(app: Any) -> bool:
         return isinstance(app, Blueprint)
 
-    def request_validation(self, request, query, json, form, headers, cookies):
-        """
-        req_query: werkzeug.datastructures.ImmutableMultiDict
-        req_json: dict
-        req_headers: werkzeug.datastructures.EnvironHeaders
-        req_cookies: werkzeug.datastructures.ImmutableMultiDict
-        """
-        req_query = get_multidict_items(request.args, query)
+    def get_request_data(self, request, endpoint: EndpointSpec) -> RequestData:
+        """Extract and normalize a Flask request without model validation."""
+
+        req_query = get_multidict_items(request.args, endpoint.query)
         req_headers = dict(iter(request.headers)) or {}
         req_cookies = get_multidict_items(request.cookies)
-        has_data = request.method not in ("GET", "DELETE")
-        # flask Request.mimetype is already normalized
-        use_json = json and has_data and request.mimetype not in self.FORM_MIMETYPE
-        use_form = form and has_data and request.mimetype in self.FORM_MIMETYPE
 
-        request.context = Context(
-            self.model_adapter.validate_obj(query, req_query) if query else None,
-            self.model_adapter.validate_obj(json, request.get_json(silent=True) or {})
-            if use_json
-            else None,
-            self.model_adapter.validate_obj(form, self.fill_form(request))
-            if use_form
-            else None,
-            self.model_adapter.validate_obj(headers, req_headers) if headers else None,
-            self.model_adapter.validate_obj(cookies, req_cookies) if cookies else None,
+        has_data = request.method not in ("GET", "DELETE")
+
+        # Flask Request.mimetype is already normalized.
+        use_json = (
+                endpoint.json
+                and has_data
+                and request.mimetype not in self.FORM_MIMETYPE
+        )
+        use_form = (
+                endpoint.form
+                and has_data
+                and request.mimetype in self.FORM_MIMETYPE
+        )
+
+        return RequestData(
+            query=req_query,
+            json=request.get_json(silent=True) or {} if use_json else None,
+            form=self.fill_form(request) if use_form else None,
+            headers=req_headers,
+            cookies=req_cookies,
         )
 
     def validate_response(
@@ -112,23 +115,17 @@ class FlaskPlugin(WerkzeugPlugin):
     ):
         response, req_validation_error = None, None
 
+        request_data = RequestData()
+
         if not endpoint.skip_validation:
             try:
-                self.request_validation(
-                    request,
-                    endpoint.query,
-                    endpoint.json,
-                    endpoint.form,
-                    endpoint.headers,
-                    endpoint.cookies,
+                request_data = self.validate_request_data(
+                    self.get_request_data(request, endpoint),
+                    endpoint,
                 )
+                self.set_request_data(request, request_data)
             except self.model_adapter.validation_error as err:
-                req_validation_error = err
-                errors = self.model_adapter.validation_errors(err)
-                response = make_response(
-                    jsonify(errors),
-                    endpoint.validation_error_status,
-                )
+                ...
 
         endpoint.before(
             request,
@@ -142,12 +139,7 @@ class FlaskPlugin(WerkzeugPlugin):
             assert response
             abort(response)
 
-        for name in endpoint.injected_arguments:
-            kwargs[name] = getattr(
-                getattr(request, "context", None),
-                name,
-                None,
-            )
+        self.inject_request_data(request_data, endpoint, kwargs)
 
         result = func(*args, **kwargs)
 

@@ -16,12 +16,13 @@ from spectree._types import JsonType, ModelAdapterType
 from spectree.config import Configuration
 from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
+from spectree.request_data import RequestData
 
 if TYPE_CHECKING:
     # to avoid cyclic import
     from spectree.spec import SpecTree
 
-
+# TODO Should be deprecated in the future?
 class Context(NamedTuple):
     query: Optional[Any]
     json: Optional[Any]
@@ -70,6 +71,49 @@ class BasePlugin(Generic[BackendRoute]):
         the precomputed endpoint contract.
         """
         raise NotImplementedError
+
+    def validate_request_data(
+            self,
+            request_data: RequestData,
+            endpoint: EndpointSpec,
+    ) -> RequestData:
+        """Validate normalized request data according to the endpoint contract."""
+
+        def validate(model: ModelSpec | None, value: Any) -> Any:
+            if model is None or value is None:
+                return None
+            return self.model_adapter.validate_obj(model, value)
+
+        return RequestData(
+            query=validate(endpoint.query, request_data.query),
+            json=validate(endpoint.json, request_data.json),
+            form=validate(endpoint.form, request_data.form),
+            headers=validate(endpoint.headers, request_data.headers),
+            cookies=validate(endpoint.cookies, request_data.cookies),
+        )
+
+    @staticmethod
+    def set_request_data(request: Any, request_data: RequestData) -> None:
+        """Expose validated request data through the framework request context."""
+        context = getattr(request, "context", None)
+
+        if context is None or isinstance(context, RequestData):
+            request.context = request_data
+            return
+
+        # Falcon has a mutable request context object. Preserve it.
+        for name in ("query", "json", "form", "headers", "cookies"):
+            setattr(context, name, getattr(request_data, name))
+
+    @staticmethod
+    def inject_request_data(
+            request_data: RequestData,
+            endpoint: EndpointSpec,
+            kwargs: dict[str, Any],
+    ) -> None:
+        """Inject prevalidated request values into endpoint arguments."""
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(request_data, name)
 
     def find_routes(self) -> BackendRoute:
         """
