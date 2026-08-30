@@ -618,3 +618,51 @@ def test_compiled_generic_model(model_case):
         {"user_id": 2},
     ]
 
+
+def test_plain_dataclass_is_supported_as_model(model_case):
+    adapter = model_case.adapter
+
+    instance = adapter.validate_obj(
+        SimpleModel,
+        {"user_id": "1"},
+    )
+
+    assert instance == SimpleModel(user_id=1)
+    assert adapter.is_model_type(SimpleModel) is True
+    assert adapter.is_model_instance(instance, SimpleModel) is True
+    assert adapter.validate_json(
+        SimpleModel,
+        b'{"user_id":"1"}',
+    ) == SimpleModel(user_id=1)
+    assert adapter.dump_json(instance) == b'{"user_id":1}'
+
+    schema = adapter.json_schema(
+        SimpleModel,
+        ref_template="#/components/schemas/{model}",
+    )
+    assert schema["properties"]["user_id"]["type"] == "integer"
+
+
+def test_nested_dataclass_is_supported_as_model(model_case):
+    adapter = model_case.adapter
+
+    instance = adapter.validate_obj(
+        NestedDataclass,
+        {"child": {"user_id": "1"}},
+    )
+
+    assert instance == NestedDataclass(
+        child=SimpleModel(user_id=1),
+        tags=[],
+    )
+    assert adapter.is_model_type(NestedDataclass) is True
+    assert adapter.is_model_instance(instance, NestedDataclass) is True
+    assert adapter.dump_json(instance) == (
+        b'{"child":{"user_id":1},"tags":[]}'
+    )
+
+
+def test_plain_dataclass_is_partial_model_instance(model_case):
+    instance = SimpleModel(user_id=1)
+
+    assert model_case.adapter.is_partial_model_instance(instance) is True
