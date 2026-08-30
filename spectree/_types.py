@@ -13,6 +13,7 @@ HookHandler = Callable[
     [Any, Any, Exception | None, Any, ModelAdapterType],
     Any,
 ]
+ModelAdapterType = ModelAdapter[Any, Exception, Any]
 
 
 class MultiDict(Protocol):
