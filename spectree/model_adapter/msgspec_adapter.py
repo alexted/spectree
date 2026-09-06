@@ -73,7 +73,7 @@ class MsgspecModelAdapter(
 
         try:
             msgspec.inspect.type_info(value)
-        except (TypeError, ValueError):
+        except Exception:
             return False
 
         return True
@@ -227,5 +227,15 @@ def _model_name_for_generated_type(
     name = getattr(model, "__name__", None)
     if isinstance(name, str) and name:
         return name
+
+    origin = getattr(model, "__origin__", None)
+    if origin is not None:
+        origin_name = getattr(origin, "__name__", None)
+        if isinstance(origin_name, str) and origin_name:
+            args = getattr(model, "__args__", ())
+            if args:
+                argument_name = _model_name_for_generated_type(args[0])
+                return f"{argument_name}{origin_name.title()}"
+            return origin_name.title()
 
     return get_model_key(model).split(".", 1)[0]

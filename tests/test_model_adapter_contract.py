@@ -1,8 +1,9 @@
-from typing import Annotated
+from typing import Annotated, get_origin
 
 import pytest
 
 from spectree.model_adapter import ModelSpec
+from spectree.utils import get_model_key
 from tests.common_dataclass import DemoModel, SimpleModel
 
 
@@ -201,7 +202,7 @@ def test_optional_model_spec(model_case):
     )
 
 
-def test_plain_dataclass_is_supported_as_a_model(model_case):
+def test_converted_model_is_supported_as_a_model(model_case):
     adapter = model_case.adapter
 
     instance = adapter.validate_obj(SimpleModel, {"user_id": "1"})
@@ -389,3 +390,70 @@ def test_annotated_generic_model_schema(model_case):
     )
 
     assert schema["type"] == "array"
+
+
+def test_model_key_is_stable_for_generic_model_spec():
+    model = SimpleModel
+
+    first = get_model_key(list[model])
+    second = get_model_key(list[model])
+
+    assert first == second
+
+
+def test_model_key_distinguishes_generic_model_shapes():
+    model = SimpleModel
+
+    assert get_model_key(list[model]) != get_model_key(dict[str, model])
+    assert get_model_key(list[model]) != get_model_key(model | None)
+
+
+def test_model_key_preserves_annotated_title():
+    model = SimpleModel
+
+    plain = get_model_key(model)
+    titled = get_model_key(
+        Annotated[
+            model,
+            type("Metadata", (), {"title": "CustomUser"})(),
+        ]
+    )
+
+    assert plain != titled
+    assert titled.startswith("CustomUser.")
+
+
+@pytest.mark.parametrize(
+    "spec_factory",
+    [
+        lambda model: list[model],
+        lambda model: dict[str, model],
+        lambda model: model | None,
+        lambda model: Annotated[model, "metadata"],
+    ],
+)
+def test_model_spec_json_roundtrip(model_case, spec_factory):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+    spec = spec_factory(model)
+
+    assert adapter.is_model_type(spec)
+
+    value = adapter.validate_obj(
+        spec,
+        (
+            [{"user_id": 1}]
+            if get_origin(spec) is list
+            else {"item": {"user_id": 1}}
+            if get_origin(spec) is dict
+            else {"user_id": 1}
+        ),
+    )
+
+    payload = adapter.dump_json(value)
+    restored = adapter.validate_json(spec, payload)
+
+    assert adapter.is_model_instance(
+        restored,
+        spec,
+    )

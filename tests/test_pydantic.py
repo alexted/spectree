@@ -71,6 +71,19 @@ def test_pydantic_model_spec_generic_aliases(model_adapter):
     assert model_adapter.is_model_type(int | None)
 
 
+def test_pydantic_rejects_unsupported_model_spec(model_adapter):
+    class Unsupported:
+        value: int
+
+    assert model_adapter.is_model_type(Unsupported) is False
+
+
+def test_pydantic_accepts_nested_generic_model_spec(model_adapter):
+    spec = list[dict[str, SimpleModel]]
+
+    assert model_adapter.is_model_type(spec)
+
+
 def test_pydantic_is_model_instance_generic_aliases(model_adapter):
     model = SimpleModel
 

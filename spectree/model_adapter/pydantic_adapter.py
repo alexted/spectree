@@ -1,8 +1,15 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
+from functools import cache
 from typing import Any
 
-from pydantic import BaseModel, RootModel, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    PydanticUserError,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+)
 from pydantic_core import core_schema
 
 from spectree.model_adapter.protocol import (
@@ -59,28 +66,12 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     validation_error = ValidationError
     basefile = BaseFile
 
-    def __init__(self) -> None:
-        self._type_adapters: dict[
-            ModelSpec,
-            TypeAdapter[Any],
-        ] = {}
-
+    @staticmethod
+    @cache
     def _type_adapter(
-        self,
         model: ModelSpec,
     ) -> TypeAdapter[Any]:
-        try:
-            adapter = self._type_adapters.get(model)
-        except TypeError:
-            # A non-hashable value isn't a valid reusable typing expression,
-            # but let Pydantic produce the authoritative error.
-            return TypeAdapter(model)
-
-        if adapter is None:
-            adapter = TypeAdapter(model)
-            self._type_adapters[model] = adapter
-
-        return adapter
+        return TypeAdapter(model)
 
     @staticmethod
     def _is_base_model_type(
@@ -97,7 +88,11 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
 
         try:
             self._type_adapter(value)
-        except (TypeError, ValueError):
+        except (
+            PydanticUserError,
+            TypeError,
+            ValueError,
+        ):
             return False
 
         return True
@@ -108,9 +103,6 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         model: ModelSpec,
     ) -> bool:
         if self._is_base_model_type(model):
-            return isinstance(value, model)
-
-        if isinstance(model, type) and is_dataclass(model):
             return isinstance(value, model)
 
         try:
@@ -242,5 +234,15 @@ def _model_name_for_generated_type(
     name = getattr(model, "__name__", None)
     if isinstance(name, str) and name:
         return name
+
+    origin = getattr(model, "__origin__", None)
+    if origin is not None:
+        origin_name = getattr(origin, "__name__", None)
+        if isinstance(origin_name, str) and origin_name:
+            args = getattr(model, "__args__", ())
+            if args:
+                argument_name = _model_name_for_generated_type(args[0])
+                return f"{argument_name}{origin_name.title()}"
+            return origin_name.title()
 
     return get_model_key(model).split(".", 1)[0]
