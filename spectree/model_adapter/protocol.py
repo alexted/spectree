@@ -1,6 +1,5 @@
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
-
 ModelClass: TypeAlias = type[Any]
 
 # A ModelSpec is an adapter-supported Python type expression.
@@ -86,18 +85,15 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         self,
         model: ModelSpec,
         value: Any,
-    ) -> ModelT:
-        ...
+    ) -> ModelT: ...
 
     def validate_json(
         self,
         model: ModelSpec,
         value: bytes,
-    ) -> ModelT:
-        ...
+    ) -> ModelT: ...
 
-    def dump_json(self, value: Any) -> bytes:
-        ...
+    def dump_json(self, value: Any) -> bytes: ...
 
     def make_root_model(
         self,
@@ -105,14 +101,12 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         name: str | None = None,
         module: str | None = None,
-    ) -> ModelSpec:
-        ...
+    ) -> ModelSpec: ...
 
     def make_list_model(
         self,
         model: ModelSpec,
-    ) -> ModelSpec:
-        ...
+    ) -> ModelSpec: ...
 
     def json_schema(
         self,
@@ -120,14 +114,12 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         ref_template: str,
         mode: SchemaMode = "validation",
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     def validation_errors(
         self,
         err: ValidationErrorT,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     def compile(self, model: ModelSpec) -> CompiledModel[ModelT]:
         """

@@ -1,10 +1,9 @@
-from typing import Annotated, get_origin
+from typing import Annotated
 
 import pytest
 
-from spectree.model_adapter import ModelSpec
 from spectree.utils import get_model_key, hash_module_path
-from tests.common_dataclass import DemoModel, SimpleModel, NestedDataclass
+from tests.common_dataclass import DemoModel, NestedDataclass, SimpleModel
 
 
 def _partial_model_instance_value(model_case, kind):
@@ -52,25 +51,26 @@ def test_compiled_model_preserves_nested_instances(model_case, wrapper):
         spec,
         [
             {"user_id": 1},
-        ] if wrapper is list else (
-            {"user_id": 1},
-        ),
+        ]
+        if wrapper is list
+        else ({"user_id": 1},),
     )
 
-    expected = wrapper([model(user_id=1)]) if wrapper is list else (
-        model(user_id=1),
-    )
+    expected = wrapper([model(user_id=1)]) if wrapper is list else (model(user_id=1),)
 
     assert instance == expected
     assert adapter.is_model_instance(instance, spec) is True
-    assert adapter.is_model_instance(
-        [
-            {"user_id": 1},
-        ] if wrapper is list else (
-            {"user_id": 1},
-        ),
-        spec,
-    ) is False
+    assert (
+        adapter.is_model_instance(
+            [
+                {"user_id": 1},
+            ]
+            if wrapper is list
+            else ({"user_id": 1},),
+            spec,
+        )
+        is False
+    )
 
 
 def test_generic_list_model_spec(model_case):
@@ -127,18 +127,18 @@ def test_generic_dict_model_spec(model_case):
         },
     )
 
-    assert all(
-        adapter.is_model_instance(item, model)
-        for item in value.values()
-    )
+    assert all(adapter.is_model_instance(item, model) for item in value.values())
 
-    assert adapter.is_model_instance(
-        {
-            "first": model(user_id=1),
-            "second": model(user_id=2),
-        },
-        spec,
-    ) is True
+    assert (
+        adapter.is_model_instance(
+            {
+                "first": model(user_id=1),
+                "second": model(user_id=2),
+            },
+            spec,
+        )
+        is True
+    )
 
 
 def test_annotated_model_spec(model_case):
@@ -272,10 +272,13 @@ def test_plain_dataclass_is_supported_as_model(model_case):
     assert type(instance) is SimpleModel
     assert adapter.is_model_type(SimpleModel) is True
     assert adapter.is_model_instance(instance, SimpleModel) is True
-    assert adapter.is_model_instance(
-        {"user_id": 1},
-        SimpleModel,
-    ) is False
+    assert (
+        adapter.is_model_instance(
+            {"user_id": 1},
+            SimpleModel,
+        )
+        is False
+    )
 
     decoded = adapter.validate_json(
         SimpleModel,
@@ -496,9 +499,7 @@ def test_plain_model_key_is_backward_compatible():
         module_path=SimpleModel.__module__,
     )
 
-    assert get_model_key(SimpleModel) == (
-        f"SimpleModel.{module_hash}"
-    )
+    assert get_model_key(SimpleModel) == (f"SimpleModel.{module_hash}")
 
 
 def test_generic_model_key_is_deterministic():
