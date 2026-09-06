@@ -1,7 +1,6 @@
 import re
 from dataclasses import is_dataclass
-from types import UnionType
-from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
+from typing import Annotated, Any, TypeAlias
 
 import msgspec
 
@@ -12,6 +11,7 @@ from spectree.model_adapter.protocol import (
 )
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
+
 
 _ERROR_PATH_RE = re.compile(r" - at `(?P<path>.+)`$")
 
@@ -46,68 +46,6 @@ def _parse_error_location(message: str) -> list[str]:
     return [part for part in path.split(".") if part]
 
 
-def _unwrap_annotated(model: ModelSpec) -> ModelSpec:
-    while get_origin(model) is Annotated:
-        model = get_args(model)[0]
-    return model
-
-
-def _is_instance_of_model(value: Any, model: ModelSpec) -> bool:
-    model = _unwrap_annotated(model)
-    origin = get_origin(model)
-
-    if model is Any:
-        result = True
-    elif model is None or model is type(None):
-        result = value is None
-    elif origin in (Union, UnionType):
-        result = any(_is_instance_of_model(value, option) for option in get_args(model))
-    elif origin is list:
-        args = get_args(model)
-        result = (
-            isinstance(value, list)
-            and len(args) == 1
-            and all(_is_instance_of_model(item, args[0]) for item in value)
-        )
-    elif origin is tuple:
-        args = get_args(model)
-        if not isinstance(value, tuple):
-            result = False
-        elif len(args) == 2 and args[1] is Ellipsis:
-            result = all(_is_instance_of_model(item, args[0]) for item in value)
-        else:
-            result = len(value) == len(args) and all(
-                _is_instance_of_model(item, item_model)
-                for item, item_model in zip(value, args, strict=True)
-            )
-    elif origin is dict:
-        args = get_args(model)
-        result = (
-            isinstance(value, dict)
-            and len(args) == 2
-            and all(
-                _is_instance_of_model(key, args[0])
-                and _is_instance_of_model(item, args[1])
-                for key, item in value.items()
-            )
-        )
-    elif origin in (set, frozenset):
-        args = get_args(model)
-        result = (
-            isinstance(value, origin)
-            and len(args) == 1
-            and all(_is_instance_of_model(item, args[0]) for item in value)
-        )
-    elif origin is not None and isinstance(origin, type):
-        result = isinstance(value, origin)
-    elif isinstance(model, type):
-        result = isinstance(value, model)
-    else:
-        result = False
-
-    return result
-
-
 class MsgspecCompiledModel:
     """Compiled msgspec runtime representation of a ModelSpec."""
 
@@ -115,7 +53,12 @@ class MsgspecCompiledModel:
         self.model_spec = model_spec
 
     def is_instance(self, value: Any) -> bool:
-        return _is_instance_of_model(value, self.model_spec)
+        msgspec.convert(
+            value,
+            type=self.model_spec,
+            strict=True,
+        )
+        return True
 
     def validate_obj(self, value: Any) -> Any:
         return msgspec.convert(
@@ -148,12 +91,16 @@ class MsgspecCompiledModel:
             else self.model_spec
         )
 
-        ref_template = ref_template.replace("{model}", "{name}")
+        ref_template = ref_template.replace(
+            "{model}",
+            "{name}",
+        )
 
         schemas, components = msgspec.json.schema_components(
             (model,),
             ref_template=ref_template,
         )
+
         schema = schemas[0]
 
         ref = schema.get("$ref")
@@ -185,7 +132,10 @@ class MsgspecModelAdapter(
         self.encoder = msgspec.json.Encoder()
         self._compiled_models: dict[ModelSpec, MsgspecCompiledModel] = {}
 
-    def compile(self, model: ModelSpec) -> MsgspecCompiledModel:
+    def compile(
+        self,
+        model: ModelSpec,
+    ) -> MsgspecCompiledModel:
         try:
             compiled = self._compiled_models.get(model)
         except TypeError:
@@ -206,7 +156,10 @@ class MsgspecModelAdapter(
 
         try:
             msgspec.inspect.type_info(value)
-        except (TypeError, ValueError):
+        except (
+            TypeError,
+            ValueError,
+        ):
             return False
 
         return True
@@ -216,7 +169,14 @@ class MsgspecModelAdapter(
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        return self.compile(model).is_instance(value)
+        try:
+            return self.compile(model).is_instance(value)
+        except (
+            msgspec.ValidationError,
+            TypeError,
+            ValueError,
+        ):
+            return False
 
     def is_partial_model_instance(
         self,
@@ -239,7 +199,10 @@ class MsgspecModelAdapter(
             )
 
         if isinstance(value, (list, tuple)):
-            return any(self.is_partial_model_instance(item) for item in value)
+            return any(
+                self.is_partial_model_instance(item)
+                for item in value
+            )
 
         return False
 
@@ -261,7 +224,7 @@ class MsgspecModelAdapter(
         self,
         value: Any,
     ) -> bytes:
-        return self.encoder.encode(value)
+        return self.compile(type(value)).dump_json(value)
 
     def make_root_model(
         self,
