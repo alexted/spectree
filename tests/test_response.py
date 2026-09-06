@@ -2,7 +2,7 @@ from typing import Annotated
 
 import pytest
 
-from spectree import get_msgspec_model_adapter
+from spectree import get_msgspec_model_adapter, get_pydantic_model_adapter
 from spectree.response import DEFAULT_CODE_DESC, Response
 from spectree.utils import get_model_key
 from tests.common_dataclass import DemoModel, SimpleModel
@@ -239,5 +239,30 @@ def test_response_accepts_annotated_model_spec():
     )
 
     compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_nested_generic_model_spec():
+    response = Response(
+        HTTP_200=list[dict[str, DemoModel]],
+    )
+
+    compiled = response.copy_for_model_adapter(
+        get_msgspec_model_adapter(),
+    )
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_nested_generic_model_spec_with_pydantic():
+
+    response = Response(
+        HTTP_200=list[dict[str, DemoModel]],
+    )
+
+    compiled = response.copy_for_model_adapter(
+        get_pydantic_model_adapter(),
+    )
 
     assert compiled.find_model(200) is not None

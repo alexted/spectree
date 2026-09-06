@@ -326,3 +326,27 @@ def test_msgspec_invalid_model_type_is_rejected():
 
     assert ADAPTER.is_model_type(Unsupported) is False
     assert ADAPTER.is_model_type(Unsupported()) is False
+
+
+def test_msgspec_annotated_generic_model_instance_detection():
+    spec = Annotated[
+        list[SimpleModel],
+        "metadata",
+    ]
+
+    value = [
+        SimpleModel(user_id=1),
+        SimpleModel(user_id=2),
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {"user_id": 1},
+        ],
+        spec,
+    )
