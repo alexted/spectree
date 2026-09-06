@@ -2,7 +2,7 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, Optional
 
 from spectree._types import ModelAdapterType, NamingStrategy
 from spectree.model_adapter import ModelClass
@@ -86,7 +86,7 @@ class Response:
             else:
                 model = model_and_description
 
-            if model:
+            if model is not None:
                 self._raw_code_models[code] = model
                 assert description is None or isinstance(description, str), (
                     "invalid HTTP status code description"
@@ -98,8 +98,8 @@ class Response:
                 self.code_descriptions[code] = description
 
     def copy_for_model_adapter(
-            self,
-            model_adapter: ModelAdapterType,
+        self,
+        model_adapter: ModelAdapterType,
     ) -> "Response":
         """
         Create an adapter-bound copy without mutating this declaration.
@@ -110,11 +110,12 @@ class Response:
 
         response.codes = list(self.codes)
         response._raw_code_models = dict(self._raw_code_models)
+        response.code_models = {}
         response.code_descriptions = dict(self.code_descriptions)
-
-        response.model_adapter = model_adapter
-        response.code_models = response._build_models(model_adapter)
         response._model_keys = {}
+        response.model_adapter = model_adapter
+
+        response.code_models = response._build_models(model_adapter)
 
         return response
 
@@ -168,7 +169,9 @@ class Response:
         self._raw_code_models[code_name] = model
         if self.model_adapter is not None:
             self.code_models[code_name] = self._build_model(model, self.model_adapter)
-        if description:
+        if description is None:
+            self.code_descriptions.pop(code_name, None)
+        else:
             self.code_descriptions[code_name] = description
 
     def has_model(self) -> bool:
