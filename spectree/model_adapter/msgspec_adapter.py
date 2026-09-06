@@ -1,6 +1,7 @@
 import re
 from dataclasses import is_dataclass
-from typing import Annotated, Any, TypeAlias
+from types import UnionType
+from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
 
 import msgspec
 
@@ -46,6 +47,115 @@ def _parse_error_location(message: str) -> list[str]:
     return [part for part in path.split(".") if part]
 
 
+def _unwrap_annotated(model: ModelSpec) -> ModelSpec:
+    while get_origin(model) is Annotated:
+        model = get_args(model)[0]
+    return model
+
+
+def _is_instance_of_model(
+    value: Any,
+    model: ModelSpec,
+) -> bool:
+    model = _unwrap_annotated(model)
+    origin = get_origin(model)
+
+    if model is Any:
+        return True
+
+    if model is None or model is type(None):
+        return value is None
+
+    if origin in (Union, UnionType):
+        return any(
+            _is_instance_of_model(value, option)
+            for option in get_args(model)
+        )
+
+    if origin is Literal:
+        return any(
+            value == literal
+            for literal in get_args(model)
+        )
+
+    if origin is list:
+        args = get_args(model)
+
+        return (
+            isinstance(value, list)
+            and len(args) == 1
+            and all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+        )
+
+    if origin is tuple:
+        args = get_args(model)
+
+        if not isinstance(value, tuple):
+            return False
+
+        if len(args) == 2 and args[1] is Ellipsis:
+            return all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+
+        return (
+            len(value) == len(args)
+            and all(
+                _is_instance_of_model(item, item_model)
+                for item, item_model in zip(value, args, strict=True)
+            )
+        )
+
+    if origin is dict:
+        args = get_args(model)
+
+        return (
+            isinstance(value, dict)
+            and len(args) == 2
+            and all(
+                _is_instance_of_model(key, args[0])
+                and _is_instance_of_model(item, args[1])
+                for key, item in value.items()
+            )
+        )
+
+    if origin is set:
+        args = get_args(model)
+
+        return (
+            isinstance(value, set)
+            and len(args) == 1
+            and all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+        )
+
+    if origin is frozenset:
+        args = get_args(model)
+
+        return (
+            isinstance(value, frozenset)
+            and len(args) == 1
+            and all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+        )
+
+    if origin is not None:
+        return isinstance(value, origin)
+
+    if isinstance(model, type):
+        return isinstance(value, model)
+
+    return False
+
+
 class MsgspecCompiledModel:
     """Compiled msgspec runtime representation of a ModelSpec."""
 
@@ -53,12 +163,7 @@ class MsgspecCompiledModel:
         self.model_spec = model_spec
 
     def is_instance(self, value: Any) -> bool:
-        msgspec.convert(
-            value,
-            type=self.model_spec,
-            strict=True,
-        )
-        return True
+        return _is_instance_of_model(value, self.model_spec)
 
     def validate_obj(self, value: Any) -> Any:
         return msgspec.convert(
@@ -121,7 +226,7 @@ class MsgspecModelAdapter(
         Any,
         msgspec.ValidationError,
         BaseFile,
-    ]
+    ],
 ):
     """Msgspec model adapter."""
 
@@ -169,14 +274,7 @@ class MsgspecModelAdapter(
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        try:
-            return self.compile(model).is_instance(value)
-        except (
-            msgspec.ValidationError,
-            TypeError,
-            ValueError,
-        ):
-            return False
+        return self.compile(model).is_instance(value)
 
     def is_partial_model_instance(
         self,
@@ -280,5 +378,7 @@ class MsgspecModelAdapter(
         ]
 
 
-def _model_name_for_generated_type(model: ModelSpec) -> str:
+def _model_name_for_generated_type(
+    model: ModelSpec,
+) -> str:
     return get_model_key(model).split(".", 1)[0]
