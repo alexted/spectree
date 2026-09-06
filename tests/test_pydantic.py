@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import Annotated, List
 
 import pytest
 
@@ -53,8 +53,9 @@ def test_is_base_model_instance(value, expected):
     assert ADAPTER.is_model_instance(value, BaseModel) is expected
 
 
+@dataclass
 class DemoDataclass:
-    pass
+    value: int = 0
 
 
 def test_pydantic_model_spec_types(
@@ -62,3 +63,46 @@ def test_pydantic_model_spec_types(
 ):
     assert model_adapter.is_model_type(DemoModel)
     assert model_adapter.is_model_type(DemoDataclass)
+
+
+def test_pydantic_model_spec_generic_aliases(model_adapter):
+    assert model_adapter.is_model_type(list[int])
+    assert model_adapter.is_model_type(dict[str, int])
+    assert model_adapter.is_model_type(int | None)
+
+
+def test_pydantic_is_model_instance_generic_aliases(model_adapter):
+    model = SimpleModel
+
+    users = [
+        SimpleModel(user_id=1),
+        SimpleModel(user_id=2),
+    ]
+
+    assert model_adapter.is_model_instance(
+        users,
+        list[model],
+    )
+
+    assert not model_adapter.is_model_instance(
+        [
+            {"user_id": 1},
+        ],
+        list[model],
+    )
+
+
+def test_pydantic_annotated_model_spec(model_adapter):
+    spec = Annotated[
+        SimpleModel,
+        "metadata",
+    ]
+
+    assert model_adapter.is_model_type(spec)
+
+    value = model_adapter.validate_obj(
+        spec,
+        {"user_id": "1"},
+    )
+
+    assert isinstance(value, SimpleModel)

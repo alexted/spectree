@@ -2,7 +2,7 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, Optional, TypeAlias
 
 from spectree._types import ModelAdapterType, NamingStrategy
 from spectree.model_adapter import ModelSpec
@@ -73,7 +73,6 @@ class Response:
         self.code_models: dict[str, ModelSpec] = {}
         self.code_descriptions: dict[str, str | None] = {}
         self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             description: str | None = None
@@ -95,7 +94,7 @@ class Response:
             else:
                 self.codes.append(code)
 
-            if description:
+            if description is not None:
                 self.code_descriptions[code] = description
 
     def copy_for_model_adapter(
@@ -129,13 +128,23 @@ class Response:
         self.code_models = self._build_models(model_adapter)
 
     def _build_model(
-        self, raw_model: Any, model_adapter: ModelAdapterType
+        self,
+        raw_model: ModelSpec,
+        model_adapter: ModelAdapterType,
     ) -> ModelSpec:
-        model = raw_model
-        origin_type = getattr(model, "__origin__", None)
+        origin_type = getattr(raw_model, "__origin__", None)
+
         if origin_type is list:
-            model = model_adapter.make_list_model(model.__args__[0])  # type: ignore
+            args = getattr(raw_model, "__args__", ())
+            if len(args) != 1:
+                raise AssertionError(f"invalid response model: {raw_model}")
+
+            model = model_adapter.make_list_model(args[0])
+        else:
+            model = raw_model
+
         assert model_adapter.is_model_type(model), f"invalid response model: {model}"
+
         return model
 
     def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelSpec]:

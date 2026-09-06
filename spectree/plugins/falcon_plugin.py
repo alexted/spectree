@@ -3,7 +3,7 @@ import inspect
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, Optional
 
 try:
     # some platforms may ban `tempfile`, e.g. Google App Engine
