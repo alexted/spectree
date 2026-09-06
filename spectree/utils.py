@@ -177,6 +177,144 @@ def hash_module_path(module_path: str):
     return sha1(module_path.encode()).hexdigest()[:7]
 
 
+def _stable_model_expression(value: Any) -> Any:
+    origin = get_origin(value)
+
+    if origin is Annotated:
+        args = get_args(value)
+        return (
+            "Annotated",
+            _stable_model_expression(args[0]),
+            tuple(_stable_metadata_expression(item) for item in args[1:]),
+        )
+
+    if origin is not None:
+        return (
+            "Generic",
+            _qualified_type_name(origin),
+            tuple(_stable_model_expression(arg) for arg in get_args(value)),
+        )
+
+    if value is None:
+        return ("None",)
+
+    if isinstance(value, type):
+        return ("Type", value.__module__, value.__qualname__)
+
+    return _stable_metadata_expression(value)
+
+
+def _stable_metadata_expression(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        result = ("None",)
+    elif isinstance(value, (str, int, float, bool, bytes)):
+        result = (
+            "Value",
+            type(value).__module__,
+            type(value).__qualname__,
+            value,
+        )
+    elif isinstance(value, Enum):
+        enum_type = type(value)
+        result = (
+            "Enum",
+            enum_type.__module__,
+            enum_type.__qualname__,
+            _stable_metadata_expression(value.value),
+        )
+    elif isinstance(value, type):
+        result = (
+            "Type",
+            value.__module__,
+            value.__qualname__,
+        )
+    elif isinstance(value, Mapping):
+        items = [
+            (
+                _stable_metadata_expression(key),
+                _stable_metadata_expression(item),
+            )
+            for key, item in value.items()
+        ]
+        result = (
+            "Mapping",
+            tuple(
+                sorted(
+                    items,
+                    key=repr,
+                )
+            ),
+        )
+    elif isinstance(value, (list, tuple)):
+        result = (
+            type(value).__module__,
+            type(value).__qualname__,
+            tuple(_stable_metadata_expression(item) for item in value),
+        )
+    elif isinstance(value, (set, frozenset)):
+        items = sorted(
+            (_stable_metadata_expression(item) for item in value),
+            key=repr,
+        )
+        result = (
+            type(value).__module__,
+            type(value).__qualname__,
+            tuple(items),
+        )
+    else:
+        data = getattr(value, "__dict__", None)
+
+        if isinstance(data, Mapping):
+            result = (
+                "Object",
+                type(value).__module__,
+                type(value).__qualname__,
+                _stable_metadata_expression(dict(data)),
+            )
+        else:
+            slots = getattr(type(value), "__slots__", ())
+
+            if isinstance(slots, str):
+                slots = (slots,)
+
+            if slots:
+                result = (
+                    "SlotsObject",
+                    type(value).__module__,
+                    type(value).__qualname__,
+                    tuple(
+                        (
+                            slot,
+                            _stable_metadata_expression(getattr(value, slot)),
+                        )
+                        for slot in slots
+                        if hasattr(value, slot)
+                    ),
+                )
+            else:
+                result = (
+                    "OpaqueObject",
+                    type(value).__module__,
+                    type(value).__qualname__,
+                )
+
+    return result
+
+
+def _qualified_type_name(value: Any) -> str:
+    module = getattr(value, "__module__", "")
+    qualname = getattr(value, "__qualname__", None)
+
+    if qualname is not None:
+        return f"{module}.{qualname}"
+
+    name = getattr(value, "__name__", None)
+    if name is not None:
+        return f"{module}.{name}"
+
+    return type(value).__name__
+
+
 def _annotated_expression_name(value: Any) -> str:
     args = get_args(value)
 
@@ -262,10 +400,9 @@ def get_model_key(model: ModelSpec) -> str:
     expression without exposing the full Python module path.
     """
     model_name = _model_expression_name(model)
+    expression = repr(_stable_model_expression(model))
 
-    module_path = model.__module__ if get_origin(model) is None else repr(model)
-
-    return f"{model_name}.{hash_module_path(module_path=module_path)}"
+    return f"{model_name}.{hash_module_path(module_path=expression)}"
 
 
 def get_nested_key(parent: str, child: str) -> str:
