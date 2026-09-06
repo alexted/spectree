@@ -400,9 +400,13 @@ def get_model_key(model: ModelSpec) -> str:
     expression without exposing the full Python module path.
     """
     model_name = _model_expression_name(model)
-    expression = repr(_stable_model_expression(model))
 
-    return f"{model_name}.{hash_module_path(module_path=expression)}"
+    if isinstance(model, type) and get_origin(model) is None:
+        module_path = model.__module__
+    else:
+        module_path = repr(_stable_model_expression(model))
+
+    return f"{model_name}.{hash_module_path(module_path=module_path)}"
 
 
 def get_nested_key(parent: str, child: str) -> str:

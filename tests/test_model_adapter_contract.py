@@ -3,7 +3,7 @@ from typing import Annotated, get_origin
 import pytest
 
 from spectree.model_adapter import ModelSpec
-from spectree.utils import get_model_key
+from spectree.utils import get_model_key, hash_module_path
 from tests.common_dataclass import DemoModel, SimpleModel
 
 
@@ -506,5 +506,19 @@ def test_model_key_is_deterministic_for_nested_annotated_generic():
         list[dict[str, SimpleModel]],
         "metadata",
     ]
+
+    assert get_model_key(spec) == get_model_key(spec)
+
+
+def test_plain_model_key_is_backward_compatible():
+    module_hash = hash_module_path(
+        module_path=SimpleModel.__module__,
+    )
+
+    assert get_model_key(SimpleModel) == (f"SimpleModel.{module_hash}")
+
+
+def test_generic_model_key_is_deterministic():
+    spec = list[SimpleModel]
 
     assert get_model_key(spec) == get_model_key(spec)
