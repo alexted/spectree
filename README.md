@@ -156,7 +156,7 @@ Of course. Check the [`Configuration`](spectree/config.py) source.
 You can update the config when init the spectree like:
 
 ```py
-SpecTree('flask', title='Demo API', version='v1.0', path='doc')
+SpecTree("flask", title="Demo API", version="v1.0", path="doc")
 ```
 
 ### How do I choose between `pydantic` and `msgspec`?
@@ -176,7 +176,7 @@ To build a response for the endpoint, you need to declare the status code with f
 
 ```py
 Response(HTTP_200=None, HTTP_403=ForbidModel)
-Response('HTTP_200') # equals to Response(HTTP_200=None)
+Response("HTTP_200")  # equals to Response(HTTP_200=None)
 # with custom code description
 Response(HTTP_403=(ForbidModel, "custom code description"))
 ```
@@ -198,12 +198,10 @@ Starts from v1.3.0, this will skip all the validations. As a result, you won't b
 Both hooks now receive the active model adapter as their last argument:
 
 ```py
-def before(req, resp, req_validation_error, instance, model_adapter):
-    ...
+def before(req, resp, req_validation_error, instance, model_adapter): ...
 
 
-def after(req, resp, resp_validation_error, instance, model_adapter):
-    ...
+def after(req, resp, resp_validation_error, instance, model_adapter): ...
 ```
 
 This is useful when you need adapter-specific error details or other model-backend behavior in a custom hook.
@@ -223,7 +221,8 @@ For secure API endpoints, it is needed to define the `security_schemes` argument
 <p>
 
 ```py
-spec = SpecTree(security_schemes=[
+spec = SpecTree(
+    security_schemes=[
         SecurityScheme(
             name="auth_apiKey",
             data={"type": "apiKey", "name": "Authorization", "in": "header"},
@@ -255,17 +254,18 @@ spec = SpecTree(security_schemes=[
 @spec.validate(
     resp=Response(HTTP_200=None),
 )
-def foo():
-    ...
+def foo(): ...
 
 
 # API endpoint secured by API key type or OAuth2 type
 @spec.validate(
     resp=Response(HTTP_200=None),
-    security={"auth_apiKey": [], "auth_oauth2": ["read", "write"]},  # Local security type
+    security={
+        "auth_apiKey": [],
+        "auth_oauth2": ["read", "write"],
+    },  # Local security type
 )
-def bar():
-    ...
+def bar(): ...
 ```
 
 </p>
@@ -279,7 +279,8 @@ def bar():
 <p>
 
 ```py
-spec = SpecTree(security_schemes=[
+spec = SpecTree(
+    security_schemes=[
         SecurityScheme(
             name="auth_apiKey",
             data={"type": "apiKey", "name": "Authorization", "in": "header"},
@@ -307,30 +308,28 @@ spec = SpecTree(security_schemes=[
     # ...
 )
 
+
 # Force no security
 @spec.validate(
     resp=Response(HTTP_200=None),
-    security={}, # Locally overridden security type
+    security={},  # Locally overridden security type
 )
-def foo():
-    ...
+def foo(): ...
 
 
 # Force another type of security than global one
 @spec.validate(
     resp=Response(HTTP_200=None),
-    security={"auth_oauth2": ["read"]}, # Locally overridden security type
+    security={"auth_oauth2": ["read"]},  # Locally overridden security type
 )
-def bar():
-    ...
+def bar(): ...
 
 
 # Use the global security
 @spec.validate(
     resp=Response(HTTP_200=None),
 )
-def foobar():
-    ...
+def foobar(): ...
 ```
 
 </p>
@@ -365,7 +364,9 @@ Inherit `spectree.plugins.base.BasePlugin` and implement the functions you need.
 ### How to use a customized template page?
 
 ```py
-SpecTree(page_templates={"page_name": "customized page contains {spec_url} for rendering"})
+SpecTree(
+    page_templates={"page_name": "customized page contains {spec_url} for rendering"}
+)
 ```
 
 In the above example, the key "page_name" will be used in the URL to access this page "/apidoc/page_name". The value should be a string that contains `{spec_url}` which will be used to access the OpenAPI JSON file.
@@ -409,7 +410,7 @@ class Profile(BaseModel):
     age: int = Field(..., gt=0, lt=150, description="user age(Human)")
 
     model_config = ConfigDict(
-        json_schema_extra = {
+        json_schema_extra={
             # provide an example
             "example": {
                 "name": "very_important_user",
@@ -458,7 +459,7 @@ class Profile(BaseModel):
     age: int = Field(..., gt=0, lt=150, description="user age")
 
     model_config = ConfigDict(
-        json_schema_extra = {
+        json_schema_extra={
             # provide an example
             "example": {
                 "name": "very_important_user",

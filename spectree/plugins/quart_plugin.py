@@ -1,6 +1,6 @@
 import inspect
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
 import quart
 from quart import Blueprint, abort, current_app, jsonify, make_response, request

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from functools import partial
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, Optional
 
 from starlette.convertors import CONVERTOR_TYPES
 from starlette.requests import Request

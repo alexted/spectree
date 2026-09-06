@@ -6,6 +6,7 @@ from typing import (
     Any,
     Generic,
     NamedTuple,
+    Optional,
     TypeVar,
 )
 
@@ -152,7 +153,7 @@ def validate_response(
         JSON-serialized response payload.
     :param force_serialize: Always serialize the validation model instance.
     """
-    if not validation_model:
+    if validation_model is None:
         return ResponseValidationResult(payload=response_payload)
 
     final_response_payload: Any = None

@@ -8,7 +8,7 @@ pytest.importorskip("msgspec")
 import msgspec
 
 import spectree.model_adapter as model_adapter_module
-from spectree import Response, model_adapter
+from spectree import Response
 from spectree.config import Configuration
 from spectree.model_adapter import get_msgspec_model_adapter
 from spectree.model_adapter.msgspec_adapter import MsgspecModelAdapter
@@ -237,13 +237,15 @@ def test_msgspec_generic_schema_with_stable_model_key():
     assert schemas[root_model_key]["title"] == "Users"
 
 
-class DemoStruct:
-    pass
+class DemoStruct(msgspec.Struct):
+    value: int
 
 
 def test_msgspec_model_spec_type_expressions():
     assert ADAPTER.is_model_type(DemoStruct)
     assert ADAPTER.is_model_type(list[DemoStruct])
+    assert ADAPTER.is_model_type(dict[str, DemoStruct])
+    assert ADAPTER.is_model_type(DemoStruct | None)
 
 
 def test_msgspec_annotated_model_spec():
@@ -254,3 +256,73 @@ def test_msgspec_annotated_model_spec():
 
     assert ADAPTER.is_model_type(model)
 
+    value = ADAPTER.validate_obj(
+        model,
+        {"value": 1},
+    )
+
+    assert value == DemoStruct(value=1)
+
+    assert ADAPTER.is_model_instance(
+        value,
+        model,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        {"value": 1},
+        model,
+    )
+
+
+def test_msgspec_generic_model_instance_detection():
+    spec = list[SimpleModel]
+
+    value = [
+        SimpleModel(user_id=1),
+        SimpleModel(user_id=2),
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {"user_id": 1},
+        ],
+        spec,
+    )
+
+
+def test_msgspec_nested_generic_model_instance_detection():
+    spec = list[dict[str, SimpleModel]]
+
+    value = [
+        {
+            "first": SimpleModel(user_id=1),
+            "second": SimpleModel(user_id=2),
+        }
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {
+                "first": {"user_id": 1},
+            }
+        ],
+        spec,
+    )
+
+
+def test_msgspec_invalid_model_type_is_rejected():
+    class Unsupported:
+        pass
+
+    assert ADAPTER.is_model_type(Unsupported) is False
+    assert ADAPTER.is_model_type(Unsupported()) is False

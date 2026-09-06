@@ -1,7 +1,9 @@
+from typing import Annotated
+
 import pytest
 
 from spectree.model_adapter import ModelSpec
-from tests.common_dataclass import SimpleModel, DemoModel
+from tests.common_dataclass import DemoModel, SimpleModel
 
 
 def _partial_model_instance_value(model_case, kind):
@@ -30,6 +32,173 @@ def test_validate_obj_and_is_model_instance(model_case):
     assert adapter.is_model_instance(instance, simple_model) is True
     assert adapter.is_model_instance({"user_id": 1}, simple_model) is False
     assert adapter.is_model_instance(simple_model, simple_model) is False
+
+
+def test_generic_list_model_spec(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    spec = list[model]
+
+    assert adapter.is_model_type(spec) is True
+
+    value = adapter.validate_obj(
+        spec,
+        [{"user_id": "1"}, {"user_id": "2"}],
+    )
+
+    assert len(value) == 2
+    assert all(adapter.is_model_instance(item, model) for item in value)
+
+    assert (
+        adapter.is_model_instance(
+            [{"user_id": 1}],
+            spec,
+        )
+        is False
+    )
+
+    decoded = adapter.validate_json(
+        spec,
+        b'[{"user_id": 1}, {"user_id": 2}]',
+    )
+
+    assert len(decoded) == 2
+
+
+def test_generic_dict_model_spec(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    spec = dict[str, model]
+
+    assert adapter.is_model_type(spec) is True
+
+    value = adapter.validate_obj(
+        spec,
+        {
+            "first": {"user_id": "1"},
+            "second": {"user_id": "2"},
+        },
+    )
+
+    assert all(adapter.is_model_instance(item, model) for item in value.values())
+
+    assert (
+        adapter.is_model_instance(
+            value,
+            spec,
+        )
+        is True
+    )
+
+    assert (
+        adapter.is_model_instance(
+            {
+                "first": {"user_id": 1},
+            },
+            spec,
+        )
+        is False
+    )
+
+
+def test_annotated_model_spec(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    spec = Annotated[
+        model,
+        "spectree-test-metadata",
+    ]
+
+    assert adapter.is_model_type(spec) is True
+
+    instance = adapter.validate_obj(
+        spec,
+        {"user_id": "1"},
+    )
+
+    assert (
+        adapter.is_model_instance(
+            instance,
+            spec,
+        )
+        is True
+    )
+
+    assert adapter.dump_json(instance) == b'{"user_id":1}'
+
+
+def test_nested_generic_model_spec(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    spec = list[dict[str, model]]
+
+    value = adapter.validate_obj(
+        spec,
+        [
+            {
+                "first": {"user_id": "1"},
+                "second": {"user_id": "2"},
+            }
+        ],
+    )
+
+    assert (
+        adapter.is_model_instance(
+            value,
+            spec,
+        )
+        is True
+    )
+
+    assert (
+        adapter.is_model_instance(
+            [
+                {
+                    "first": {"user_id": 1},
+                }
+            ],
+            spec,
+        )
+        is False
+    )
+
+
+def test_optional_model_spec(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+    spec = model | None
+
+    assert adapter.is_model_type(spec) is True
+
+    instance = adapter.validate_obj(
+        spec,
+        {"user_id": "1"},
+    )
+
+    assert (
+        adapter.is_model_instance(
+            instance,
+            spec,
+        )
+        is True
+    )
+
+    assert (
+        adapter.is_model_instance(
+            None,
+            spec,
+        )
+        is True
+    )
 
 
 def test_plain_dataclass_is_supported_as_a_model(model_case):
@@ -166,3 +335,57 @@ def test_model_spec_accepts_generic_alias():
     model: ModelSpec = list[DemoModel]
     assert model == list[DemoModel]
 
+
+def test_generic_model_json_roundtrip(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    spec = list[model]
+
+    original = [
+        model(user_id=1),
+        model(user_id=2),
+    ]
+
+    payload = adapter.dump_json(original)
+
+    decoded = adapter.validate_json(
+        spec,
+        payload,
+    )
+
+    assert adapter.is_model_instance(
+        decoded,
+        spec,
+    )
+
+    assert model_case.dump_python(decoded) == [
+        {"user_id": 1},
+        {"user_id": 2},
+    ]
+
+
+def test_generic_model_schema(model_case):
+    adapter = model_case.adapter
+
+    model = model_case.get_model(SimpleModel)
+
+    schema = adapter.json_schema(
+        list[model],
+        ref_template="#/components/schemas/{model}",
+    )
+
+    assert schema["type"] == "array"
+
+
+def test_annotated_generic_model_schema(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    schema = adapter.json_schema(
+        Annotated[list[model], "metadata"],
+        ref_template="#/components/schemas/{model}",
+    )
+
+    assert schema["type"] == "array"

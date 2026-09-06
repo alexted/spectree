@@ -2,7 +2,14 @@ import weakref
 from collections import defaultdict
 from functools import wraps
 from importlib import import_module
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Mapping,
+    Optional,
+    Sequence,
+)
 
 from spectree._types import (
     HookHandler,
@@ -163,11 +170,11 @@ class SpecTree:
 
     def validate(  # noqa: PLR0913, PLR0917
         self,
-        query: Optional[ModelSpec] = None,
-        json: Optional[ModelSpec] = None,
-        form: Optional[ModelSpec] = None,
-        headers: Optional[ModelSpec] = None,
-        cookies: Optional[ModelSpec] = None,
+        query: ModelSpec | None = None,
+        json: ModelSpec | None = None,
+        form: ModelSpec | None = None,
+        headers: ModelSpec | None = None,
+        cookies: ModelSpec | None = None,
         resp: Optional[Response] = None,
         tags: Sequence = (),
         security: Any = None,
@@ -186,11 +193,11 @@ class SpecTree:
         - add tags to this API route
         - add security to this API route
 
-        :param query: model class for query params in the URI, like `?name=value`
-        :param json: model class for a JSON request body
-        :param form: model class for a form-data request body
-        :param headers: model class for validating request headers
-        :param cookies: model class for validating request cookies
+        :param query: model/type expression for query params
+        :param json: model/type expression for a JSON request body
+        :param form: model/type expression for a form-data request body
+        :param headers: model/type expression for validating request headers
+        :param cookies: model/type expression for validating request cookies
         :param resp: `spectree.Response`
         :param tags: a tuple of strings or :class:`spectree.models.Tag`
         :param security: dict with security config for current route and method
