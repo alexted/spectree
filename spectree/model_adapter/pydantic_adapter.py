@@ -68,10 +68,20 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
 
     @staticmethod
     @cache
-    def _type_adapter(
+    def _cached_type_adapter(
         model: ModelSpec,
     ) -> TypeAdapter[Any]:
         return TypeAdapter(model)
+
+    @classmethod
+    def _type_adapter(
+        cls,
+        model: ModelSpec,
+    ) -> TypeAdapter[Any]:
+        try:
+            return cls._cached_type_adapter(model)
+        except TypeError:
+            return TypeAdapter(model)
 
     @staticmethod
     def _is_base_model_type(
