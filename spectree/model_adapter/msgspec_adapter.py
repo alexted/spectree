@@ -1,12 +1,19 @@
 import re
-from dataclasses import asdict, is_dataclass
-from typing import Annotated, Any, TypeAlias
+from dataclasses import is_dataclass
+from types import UnionType
+from typing import Annotated, Any, Literal, TypeAlias, get_args, get_origin
+from typing import Union as TypingUnion
 
 import msgspec
 
-from spectree.model_adapter.protocol import ModelAdapter, SchemaMode, ModelSpec
+from spectree.model_adapter.protocol import (
+    ModelAdapter,
+    ModelSpec,
+    SchemaMode,
+)
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
+
 
 _ERROR_PATH_RE = re.compile(r" - at `(?P<path>.+)`$")
 
@@ -41,7 +48,6 @@ def _parse_error_location(
 
     path = path.removeprefix("$")
     path = path.replace("[", ".").replace("]", "")
-
     return [part for part in path.split(".") if part]
 
 
@@ -52,28 +58,7 @@ class MsgspecCompiledModel:
         self.model_spec = model_spec
 
     def is_instance(self, value: Any) -> bool:
-        model = self.model_spec
-        origin = get_origin(model)
-
-        while origin is Annotated:
-            model = get_args(model)[0]
-            origin = get_origin(model)
-
-        if origin is list:
-            item_model = get_args(model)[0]
-
-            return (
-                isinstance(value, list)
-                and isinstance(item_model, type)
-                and all(isinstance(item, item_model) for item in value)
-            )
-        if isinstance(model, type) and is_dataclass(model):
-            return isinstance(value, model)
-        return (
-            isinstance(model, type)
-            and issubclass(model, msgspec.Struct)
-            and isinstance(value, model)
-        )
+        return _is_instance_of_model(value, self.model_spec)
 
     def validate_obj(self, value: Any) -> Any:
         return msgspec.convert(
@@ -89,18 +74,27 @@ class MsgspecCompiledModel:
             strict=False,
         )
 
+    def dump_json(self, value: Any) -> bytes:
+        return msgspec.json.encode(value)
+
     def json_schema(
         self,
         *,
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        if self.model_spec is msgspec.ValidationError:
-            model = MsgspecValidationError
-        else:
-            model = self.model_spec
+        del mode
 
-        ref_template = ref_template.replace("{model}", "{name}")
+        model = (
+            MsgspecValidationError
+            if self.model_spec is msgspec.ValidationError
+            else self.model_spec
+        )
+
+        ref_template = ref_template.replace(
+            "{model}",
+            "{name}",
+        )
 
         schemas, components = msgspec.json.schema_components(
             (model,),
@@ -127,16 +121,29 @@ class MsgspecModelAdapter(
         Any,
         msgspec.ValidationError,
         BaseFile,
-    ]
+    ],
 ):
     """Msgspec model adapter."""
 
-    def __init__(self, model_spec: ModelSpec) -> None:
-        self.model_spec = model_spec
+    validation_error = msgspec.ValidationError
+    basefile = BaseFile
 
-    def is_instance(self, value: Any) -> bool:
-        model = self.model_spec
-        origin = get_origin(model)
+    def __init__(self) -> None:
+        self.encoder = msgspec.json.Encoder()
+        self._compiled_models: dict[ModelSpec, MsgspecCompiledModel] = {}
+
+    def compile(self, model: ModelSpec) -> MsgspecCompiledModel:
+        try:
+            cached = self._compiled_models.get(model)
+        except TypeError:
+            return MsgspecCompiledModel(model)
+
+        if cached is not None:
+            return cached
+
+        compiled = MsgspecCompiledModel(model)
+        self._compiled_models[model] = compiled
+        return compiled
 
     def is_model_type(
         self,
@@ -147,7 +154,7 @@ class MsgspecModelAdapter(
 
         try:
             msgspec.inspect.type_info(value)
-        except Exception:
+        except (TypeError, ValueError):
             return False
 
         return True
@@ -157,16 +164,7 @@ class MsgspecModelAdapter(
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        try:
-            msgspec.convert(
-                value,
-                type=model,
-                strict=True,
-            )
-        except (msgspec.ValidationError, TypeError, ValueError):
-            return False
-
-        return True
+        return self.compile(model).is_instance(value)
 
     def is_partial_model_instance(
         self,
@@ -189,7 +187,10 @@ class MsgspecModelAdapter(
             )
 
         if isinstance(value, (list, tuple)):
-            return any(self.is_partial_model_instance(item) for item in value)
+            return any(
+                self.is_partial_model_instance(item)
+                for item in value
+            )
 
         return False
 
@@ -198,32 +199,12 @@ class MsgspecModelAdapter(
         model: ModelSpec,
         value: Any,
     ) -> Any:
-        return msgspec.convert(
-            value,
-            type=model,
-            strict=False,
-        )
-    def validate_obj(
-            self,
-            model: ModelSpec,
-            value: Any,
-    ) -> Any:
         return self.compile(model).validate_obj(value)
 
     def validate_json(
         self,
         model: ModelSpec,
         value: bytes,
-    ) -> Any:
-        return msgspec.json.decode(
-            value,
-            type=model,
-            strict=False,
-        )
-    def validate_json(
-            self,
-            model: ModelSpec,
-            value: bytes,
     ) -> Any:
         return self.compile(model).validate_json(value)
 
@@ -240,6 +221,8 @@ class MsgspecModelAdapter(
         name: str | None = None,
         module: str | None = None,
     ) -> ModelSpec:
+        del module
+
         model_name = name or "GeneratedRootModel"
 
         return Annotated[
@@ -259,40 +242,16 @@ class MsgspecModelAdapter(
         )
 
     def json_schema(
-            self,
-            model: ModelSpec,
-            *,
-            ref_template: str,
-            mode: SchemaMode = "validation",
+        self,
+        model: ModelSpec,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        if model is msgspec.ValidationError:
-            model = MsgspecValidationError
-
-        ref_template = ref_template.replace(
-            "{model}",
-            "{name}",
-        )
-
-        schemas, components = msgspec.json.schema_components(
-            (model,),
         return self.compile(model).json_schema(
             ref_template=ref_template,
             mode=mode,
         )
-
-        schema = schemas[0]
-
-        ref = schema.get("$ref")
-        if isinstance(ref, str):
-            for key in tuple(components):
-                if ref == ref_template.format(name=key):
-                    schema = components.pop(key)
-                    break
-
-        if components:
-            schema["$defs"] = components
-
-        return schema
 
     def validation_errors(
         self,
@@ -309,8 +268,93 @@ class MsgspecModelAdapter(
         ]
 
 
+def _is_instance_of_model(
+    value: Any,
+    model: ModelSpec,
+) -> bool:
+    if model is Any:
+        return True
+
+    if model is None or model is type(None):
+        return value is None
+
+    origin = get_origin(model)
+
+    if origin is Annotated:
+        return _is_instance_of_model(value, get_args(model)[0])
+
+    if origin is Literal:
+        return any(value == literal for literal in get_args(model))
+
+    if origin in (TypingUnion, UnionType):
+        return any(
+            _is_instance_of_model(value, option)
+            for option in get_args(model)
+        )
+
+    if origin is list:
+        args = get_args(model)
+        return (
+            isinstance(value, list)
+            and len(args) == 1
+            and all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+        )
+
+    if origin is tuple:
+        if not isinstance(value, tuple):
+            return False
+
+        args = get_args(model)
+
+        if len(args) == 2 and args[1] is Ellipsis:
+            return all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+
+        return (
+            len(value) == len(args)
+            and all(
+                _is_instance_of_model(item, item_model)
+                for item, item_model in zip(value, args, strict=True)
+            )
+        )
+
+    if origin is dict:
+        args = get_args(model)
+
+        return (
+            isinstance(value, dict)
+            and len(args) == 2
+            and all(
+                _is_instance_of_model(key, args[0])
+                and _is_instance_of_model(item, args[1])
+                for key, item in value.items()
+            )
+        )
+
+    if origin in (set, frozenset):
+        args = get_args(model)
+        return (
+            isinstance(value, origin)
+            and len(args) == 1
+            and all(
+                _is_instance_of_model(item, args[0])
+                for item in value
+            )
+        )
+
+    if isinstance(model, type):
+        return isinstance(value, model)
+
+    if isinstance(origin, type):
+        return isinstance(value, origin)
+
+    return False
+
+
 def _model_name_for_generated_type(model: ModelSpec) -> str:
     return get_model_key(model).split(".", 1)[0]
-
-    def compile(self, model: ModelSpec) -> MsgspecCompiledModel:
-        return MsgspecCompiledModel(model)

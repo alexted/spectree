@@ -1,5 +1,6 @@
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
+
 ModelClass: TypeAlias = type[Any]
 
 # A ModelSpec is an adapter-supported Python type expression.
@@ -29,7 +30,7 @@ class CompiledModel(Protocol[ModelT]):
     model_spec: ModelSpec
 
     def is_instance(self, value: Any) -> bool:
-        """Return whether value is already a valid instance of this model."""
+        """Return whether ``value`` is already an instance of ``model_spec``."""
         ...
 
     def validate_obj(self, value: Any) -> ModelT:
@@ -38,6 +39,10 @@ class CompiledModel(Protocol[ModelT]):
 
     def validate_json(self, value: bytes) -> ModelT:
         """Validate a JSON payload."""
+        ...
+
+    def dump_json(self, value: Any) -> bytes:
+        """Serialize a value to JSON."""
         ...
 
     def json_schema(
@@ -74,18 +79,21 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         ...
 
     def is_partial_model_instance(self, value: Any) -> bool:
+        """Return whether a value contains a model instance."""
         ...
 
     def validate_obj(
         self,
         model: ModelSpec,
-        value: Any,) -> ModelT:
+        value: Any,
+    ) -> ModelT:
         ...
 
     def validate_json(
         self,
         model: ModelSpec,
-        value: bytes,) -> ModelT:
+        value: bytes,
+    ) -> ModelT:
         ...
 
     def dump_json(self, value: Any) -> bytes:
@@ -103,7 +111,8 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
     def make_list_model(
         self,
         model: ModelSpec,
-    ) -> ModelSpec: ...
+    ) -> ModelSpec:
+        ...
 
     def json_schema(
         self,
@@ -121,5 +130,10 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         ...
 
     def compile(self, model: ModelSpec) -> CompiledModel[ModelT]:
-        """Compile a model specification into an adapter-specific runtime model."""
+        """
+        Compile a model specification into an adapter-specific runtime model.
+
+        Implementations should return a stable compiled representation for
+        hashable model specifications.
+        """
         ...
