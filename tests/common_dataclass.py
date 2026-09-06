@@ -6,7 +6,7 @@ from typing import Any
 
 
 class Order(IntEnum):
-    """Order enum"""
+    """Order enum."""
 
     asce = 0
     desc = 1
@@ -146,12 +146,6 @@ class Child:
 
 
 @dataclass
-class Headers:
-    token: str
-
-
-@dataclass
 class NestedDataclass:
     child: SimpleModel
     tags: list[int] = field(default_factory=list)
-

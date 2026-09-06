@@ -2,8 +2,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
 from functools import cache
 from types import UnionType
-from typing import Any, Literal, get_args, get_origin
-from typing import Union as TypingUnion
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -62,13 +61,87 @@ class BaseFile:
         return value
 
 
+def _unwrap_annotated(model: ModelSpec) -> ModelSpec:
+    while get_origin(model) is __import__("typing").Annotated:
+        model = get_args(model)[0]
+    return model
+
+
+def _is_base_model_type(model: ModelSpec) -> bool:
+    return isinstance(model, type) and issubclass(model, BaseModel)
+
+
+def _is_instance_of_model(value: Any, model: ModelSpec) -> bool:
+    model = _unwrap_annotated(model)
+    origin = get_origin(model)
+
+    if model is Any:
+        result = True
+    elif model is None or model is type(None):
+        result = value is None
+    elif origin in (Union, UnionType):
+        result = any(_is_instance_of_model(value, option) for option in get_args(model))
+    elif origin is Literal:
+        result = any(value == literal for literal in get_args(model))
+    elif origin is list:
+        args = get_args(model)
+        result = (
+            isinstance(value, list)
+            and len(args) == 1
+            and all(_is_instance_of_model(item, args[0]) for item in value)
+        )
+    elif origin is tuple:
+        args = get_args(model)
+        if not isinstance(value, tuple):
+            result = False
+        elif len(args) == 2 and args[1] is Ellipsis:
+            result = all(_is_instance_of_model(item, args[0]) for item in value)
+        else:
+            result = len(value) == len(args) and all(
+                _is_instance_of_model(item, item_model)
+                for item, item_model in zip(value, args, strict=True)
+            )
+    elif origin is dict:
+        args = get_args(model)
+        result = (
+            isinstance(value, dict)
+            and len(args) == 2
+            and all(
+                _is_instance_of_model(key, args[0])
+                and _is_instance_of_model(item, args[1])
+                for key, item in value.items()
+            )
+        )
+    elif origin in (set, frozenset):
+        args = get_args(model)
+        result = (
+            isinstance(value, origin)
+            and len(args) == 1
+            and all(_is_instance_of_model(item, args[0]) for item in value)
+        )
+    elif origin is not None and isinstance(origin, type):
+        result = isinstance(value, origin)
+    elif isinstance(model, type):
+        result = isinstance(value, model)
+    else:
+        result = False
+
+    return result
+
+
+def _make_type_adapter(
+    model: ModelSpec,
+) -> TypeAdapter[Any]:
+    return PydanticModelAdapter._type_adapter(model)
+
+
 class PydanticCompiledModel:
     """Compiled Pydantic runtime representation of a ModelSpec."""
 
     def __init__(self, model_spec: ModelSpec) -> None:
         self.model_spec = model_spec
         self._is_base_model = _is_base_model_type(model_spec)
-        self._type_adapter = None
+        self._type_adapter: TypeAdapter[Any] | None = None
 
         if not self._is_base_model and model_spec is not ValidationError:
             self._type_adapter = _make_type_adapter(model_spec)
@@ -80,8 +153,11 @@ class PydanticCompiledModel:
         if self._is_base_model:
             return self.model_spec.model_validate(value)
 
-        if self.model_spec is ValidationError:
-            return self._type_adapter.validate_python(value)
+        if self._type_adapter is None:
+            raise TypeError(
+                f"Model specification {self.model_spec!r} "
+                "cannot be used for object validation."
+            )
 
         return self._type_adapter.validate_python(value)
 
@@ -89,12 +165,18 @@ class PydanticCompiledModel:
         if self._is_base_model:
             return self.model_spec.model_validate_json(value)
 
-        if self.model_spec is ValidationError:
-            return self._type_adapter.validate_json(value)
+        if self._type_adapter is None:
+            raise TypeError(
+                f"Model specification {self.model_spec!r} "
+                "cannot be used for JSON validation."
+            )
 
         return self._type_adapter.validate_json(value)
 
-    def dump_json(self, value: Any) -> bytes:
+    def dump_json(
+        self,
+        value: Any,
+    ) -> bytes:
         if isinstance(value, BaseModel):
             return value.model_dump_json().encode("utf-8")
 
@@ -118,15 +200,19 @@ class PydanticCompiledModel:
                 mode=mode,
             )
 
+        if self._type_adapter is None:
+            raise TypeError(
+                f"Model specification {self.model_spec!r} "
+                "cannot be used for JSON schema generation."
+            )
+
         return self._type_adapter.json_schema(
             ref_template=ref_template,
             mode=mode,
         )
 
 
-class PydanticModelAdapter(
-    ModelAdapter[Any, ValidationError, type[BaseFile]],
-):
+class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     """Pydantic model adapter."""
 
     validation_error = ValidationError
@@ -135,22 +221,26 @@ class PydanticModelAdapter(
     def __init__(self) -> None:
         self._compiled_models: dict[ModelSpec, PydanticCompiledModel] = {}
 
-    def compile(self, model: ModelSpec) -> PydanticCompiledModel:
+    def compile(
+        self,
+        model: ModelSpec,
+    ) -> PydanticCompiledModel:
         try:
-            cached = self._compiled_models.get(model)
+            compiled = self._compiled_models.get(model)
         except TypeError:
             return PydanticCompiledModel(model)
 
-        if cached is not None:
-            return cached
+        if compiled is None:
+            compiled = PydanticCompiledModel(model)
+            self._compiled_models[model] = compiled
 
-        compiled = PydanticCompiledModel(model)
-        self._compiled_models[model] = compiled
         return compiled
 
     @staticmethod
     @cache
-    def _cached_type_adapter(model: ModelSpec) -> TypeAdapter[Any]:
+    def _cached_type_adapter(
+        model: ModelSpec,
+    ) -> TypeAdapter[Any]:
         return TypeAdapter(model)
 
     @classmethod
@@ -164,12 +254,6 @@ class PydanticModelAdapter(
             return TypeAdapter(model)
 
         return cls._cached_type_adapter(model)
-
-    @staticmethod
-    def _is_base_model_type(
-        model: ModelSpec,
-    ) -> bool:
-        return _is_base_model_type(model)
 
     def is_model_type(
         self,
@@ -217,10 +301,7 @@ class PydanticModelAdapter(
             )
 
         if isinstance(value, (list, tuple)):
-            return any(
-                self.is_partial_model_instance(item)
-                for item in value
-            )
+            return any(self.is_partial_model_instance(item) for item in value)
 
         return False
 
@@ -291,109 +372,7 @@ class PydanticModelAdapter(
         return err.errors(include_context=False)
 
 
-def _is_base_model_type(model: ModelSpec) -> bool:
-    return isinstance(model, type) and issubclass(model, BaseModel)
-
-
-def _make_type_adapter(model: ModelSpec) -> TypeAdapter[Any]:
-    return PydanticModelAdapter._type_adapter(model)
-
-
-def _is_instance_of_model(
-    value: Any,
+def _model_name_for_generated_type(
     model: ModelSpec,
-) -> bool:
-    if model is Any:
-        return True
-
-    if model is None or model is type(None):
-        return value is None
-
-    origin = get_origin(model)
-
-    if origin is not None:
-        if origin is Literal:
-            return any(value == literal for literal in get_args(model))
-
-        if origin in (TypingUnion, UnionType):
-            return any(
-                _is_instance_of_model(value, option)
-                for option in get_args(model)
-            )
-
-        if str(origin) == "<class 'typing.Annotated'>":
-            return _is_instance_of_model(value, get_args(model)[0])
-
-        args = get_args(model)
-
-        if origin is list:
-            return (
-                isinstance(value, list)
-                and len(args) == 1
-                and all(
-                    _is_instance_of_model(item, args[0])
-                    for item in value
-                )
-            )
-
-        if origin is tuple:
-            if not isinstance(value, tuple):
-                return False
-
-            if len(args) == 2 and args[1] is Ellipsis:
-                return all(
-                    _is_instance_of_model(item, args[0])
-                    for item in value
-                )
-
-            return (
-                len(value) == len(args)
-                and all(
-                    _is_instance_of_model(item, item_model)
-                    for item, item_model in zip(value, args, strict=True)
-                )
-            )
-
-        if origin is dict:
-            return (
-                isinstance(value, dict)
-                and len(args) == 2
-                and all(
-                    _is_instance_of_model(key, args[0])
-                    and _is_instance_of_model(item, args[1])
-                    for key, item in value.items()
-                )
-            )
-
-        if origin in (set, frozenset):
-            container_type = origin
-            return (
-                isinstance(value, container_type)
-                and len(args) == 1
-                and all(
-                    _is_instance_of_model(item, args[0])
-                    for item in value
-                )
-            )
-
-        if isinstance(origin, type):
-            return isinstance(value, origin)
-
-        return False
-
-    if isinstance(model, type):
-        return isinstance(value, model)
-
-    try:
-        converted = _make_type_adapter(model).validate_python(
-            value,
-            strict=True,
-        )
-    except (ValidationError, TypeError, ValueError):
-        return False
-
-    return converted is value
-
-
-def _model_name_for_generated_type(model: ModelSpec) -> str:
+) -> str:
     return get_model_key(model).split(".", 1)[0]
