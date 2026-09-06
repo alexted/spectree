@@ -1,6 +1,5 @@
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
-
 ModelClass: TypeAlias = type[Any]
 ModelSpec: TypeAlias = Any
 
