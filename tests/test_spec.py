@@ -599,7 +599,7 @@ def test_validation_and_serialization_models_have_distinct_schema_components(
     )
 
 
-def test_generate_spec_does_not_mutate_registered_schema(
+def test_generate_spec_is_deterministic_and_does_not_mutate_registry(
     model_case,
     monkeypatch,
 ):
@@ -615,6 +615,7 @@ def test_generate_spec_does_not_mutate_registered_schema(
             if model is target_model
             else "ValidationError"
         ),
+        nested_naming_strategy=lambda parent, child: f"{parent}.{child}",
         model_adapter=model_case.adapter,
     )
 
@@ -657,17 +658,17 @@ def test_generate_spec_does_not_mutate_registered_schema(
 
     api.register(app)
 
-    before = json_compatible_deepcopy(dict(api.models))
+    before = api.models.snapshot()
 
     with app.app_context():
-        first_spec = api.spec
+        first_spec = api._generate_spec()
 
-    after_first = json_compatible_deepcopy(dict(api.models))
+    after_first = api.models.snapshot()
 
     with app.app_context():
         second_spec = api._generate_spec()
 
-    after_second = json_compatible_deepcopy(dict(api.models))
+    after_second = api.models.snapshot()
 
     assert before == after_first
     assert after_first == after_second
@@ -714,6 +715,34 @@ def test_response_declaration_is_not_mutated_by_spectree(
     assert response_endpoint.resp.model_adapter is api.model_adapter
 
 
+def test_response_copy_does_not_share_mutable_state(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="SharedResponseModel",
+    )
+
+    response = Response(
+        HTTP_200=(model, "OK"),
+    )
+
+    compiled = response.copy_for_model_adapter(
+        SpecTree(
+            "flask",
+            model_adapter=model_case.adapter,
+        ).model_adapter,
+    )
+
+    compiled.code_descriptions["HTTP_200"] = "changed"
+    compiled._model_keys["HTTP_200"] = "response"
+
+    assert response.code_descriptions["HTTP_200"] == "OK"
+    assert response._model_keys == {}
+    assert response.model_adapter is None
+    assert response.code_models == {}
+
+
 def test_response_can_be_reused_by_different_model_adapters(
     model_case,
 ):
@@ -737,3 +766,151 @@ def test_response_can_be_reused_by_different_model_adapters(
     assert response.model_adapter is None
     assert compiled.model_adapter is pydantic_api.model_adapter
     assert response.code_models == {}
+
+
+def test_endpoint_spec_from_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    class Body:
+        pass
+
+    @api.validate()
+    def endpoint(query: Query, json: Body):
+        return None
+
+    endpoint_spec = endpoint._endpoint_spec
+
+    assert endpoint_spec.query is Query
+    assert endpoint_spec.json is Body
+    assert endpoint_spec.form is None
+    assert endpoint_spec.headers is None
+    assert endpoint_spec.cookies is None
+
+    assert endpoint_spec.injected_arguments == {
+        "query",
+        "json",
+    }
+
+
+def test_runtime_does_not_resolve_unrelated_annotations():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    class DemoModel:
+        pass
+
+    def endpoint(
+        json: DemoModel,
+        dependency: "CompletelyNonExistentType",
+    ):
+        return {"ok": True}
+
+    decorated = api.validate()(endpoint)
+
+    app.add_url_rule(
+        "/runtime-annotation",
+        view_func=decorated,
+        methods=["POST"],
+    )
+
+    api.register(app)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/runtime-annotation",
+            json={},
+        )
+
+    assert response.status_code != 500
+
+def test_runtime_ignores_unresolvable_return_annotation():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    decorated = api.validate()(type_checking_view_func)
+
+    app.add_url_rule(
+        "/type-checking-runtime",
+        view_func=decorated,
+        methods=["POST"],
+    )
+
+    api.register(app)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/type-checking-runtime",
+            json={},
+        )
+
+    assert response.status_code != 500
+
+
+def test_spec_generation_does_not_depend_on_previous_spec_access(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="StableModel",
+    )
+
+    api = SpecTree(
+        "flask",
+        model_adapter=model_case.adapter,
+    )
+
+    app = Flask(__name__)
+
+    @app.route("/stable")
+    @api.validate(query=model)
+    def stable():
+        return "ok"
+
+    api.register(app)
+
+    with app.app_context():
+        generated_before = api._generate_spec()
+        cached_spec = api.spec
+        generated_after = api._generate_spec()
+
+    assert generated_before == cached_spec
+    assert generated_before == generated_after
+
+
+def test_response_can_produce_independent_bound_copies(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="IndependentResponseModel",
+    )
+
+    response = Response(HTTP_200=model)
+
+    api = SpecTree(
+        "flask",
+        model_adapter=model_case.adapter,
+    )
+
+    first = response.copy_for_model_adapter(
+        api.model_adapter,
+    )
+    second = response.copy_for_model_adapter(
+        api.model_adapter,
+    )
+
+    assert first is not second
+    assert first.code_models is not second.code_models
+    assert first.code_descriptions is not second.code_descriptions
+    assert first._model_keys is not second._model_keys
+
+    first._set_model_key("HTTP_200", "First")
+    second._set_model_key("HTTP_200", "Second")
+
+    assert first._model_keys == {"HTTP_200": "First"}
+    assert second._model_keys == {"HTTP_200": "Second"}
+
+    assert response._model_keys == {}
