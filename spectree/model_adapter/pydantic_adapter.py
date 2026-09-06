@@ -78,78 +78,103 @@ def _is_instance_of_model(
     model = _unwrap_annotated(model)
     origin = get_origin(model)
 
-    if model is Any:
-        return True
+    checks = (
+        (model is Any, True),
+        (model is None or model is type(None), value is None),
+        (
+            origin in (Union, UnionType),
+            any(_is_instance_of_model(value, option) for option in get_args(model)),
+        ),
+        (
+            origin is Literal,
+            any(value == literal for literal in get_args(model)),
+        ),
+        (
+            origin is list,
+            (
+                isinstance(value, list)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is tuple,
+            _is_tuple_instance(value, get_args(model)),
+        ),
+        (
+            origin is dict,
+            _is_dict_instance(value, get_args(model)),
+        ),
+        (
+            origin is set,
+            (
+                isinstance(value, set)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is frozenset,
+            (
+                isinstance(value, frozenset)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is not None and isinstance(origin, type),
+            isinstance(value, origin),
+        ),
+        (
+            isinstance(model, type),
+            isinstance(value, model),
+        ),
+    )
 
-    if model is None or model is type(None):
-        return value is None
-
-    if origin in (Union, UnionType):
-        return any(_is_instance_of_model(value, option) for option in get_args(model))
-
-    if origin is Literal:
-        return any(value == literal for literal in get_args(model))
-
-    if origin is list:
-        args = get_args(model)
-        return (
-            isinstance(value, list)
-            and len(args) == 1
-            and all(_is_instance_of_model(item, args[0]) for item in value)
-        )
-
-    if origin is tuple:
-        args = get_args(model)
-
-        if not isinstance(value, tuple):
-            return False
-
-        if len(args) == 2 and args[1] is Ellipsis:
-            return all(_is_instance_of_model(item, args[0]) for item in value)
-
-        return len(value) == len(args) and all(
-            _is_instance_of_model(item, item_model)
-            for item, item_model in zip(value, args, strict=True)
-        )
-
-    if origin is dict:
-        args = get_args(model)
-
-        return (
-            isinstance(value, dict)
-            and len(args) == 2
-            and all(
-                _is_instance_of_model(key, args[0])
-                and _is_instance_of_model(item, args[1])
-                for key, item in value.items()
-            )
-        )
-
-    if origin is set:
-        args = get_args(model)
-
-        return (
-            isinstance(value, set)
-            and len(args) == 1
-            and all(_is_instance_of_model(item, args[0]) for item in value)
-        )
-
-    if origin is frozenset:
-        args = get_args(model)
-
-        return (
-            isinstance(value, frozenset)
-            and len(args) == 1
-            and all(_is_instance_of_model(item, args[0]) for item in value)
-        )
-
-    if origin is not None:
-        return isinstance(value, origin)
-
-    if isinstance(model, type):
-        return isinstance(value, model)
+    for matched, result in checks:
+        if matched:
+            return result
 
     return False
+
+
+def _is_tuple_instance(
+    value: Any,
+    args: tuple[Any, ...],
+) -> bool:
+    if not isinstance(value, tuple):
+        return False
+
+    if len(args) == 2 and args[1] is Ellipsis:
+        return all(_is_instance_of_model(item, args[0]) for item in value)
+
+    return len(value) == len(args) and all(
+        _is_instance_of_model(item, item_model)
+        for item, item_model in zip(value, args, strict=True)
+    )
+
+
+def _is_dict_instance(
+    value: Any,
+    args: tuple[Any, ...],
+) -> bool:
+    return (
+        isinstance(value, dict)
+        and len(args) == 2
+        and all(
+            _is_instance_of_model(key, args[0]) and _is_instance_of_model(item, args[1])
+            for key, item in value.items()
+        )
+    )
 
 
 class PydanticCompiledModel:
@@ -163,7 +188,9 @@ class PydanticCompiledModel:
         if self._is_base_model or model_spec is ValidationError:
             self._type_adapter = None
         else:
-            self._type_adapter = PydanticModelAdapter._type_adapter(model_spec)
+            self._type_adapter = PydanticModelAdapter._type_adapter(
+                model_spec,
+            )
 
     def is_instance(self, value: Any) -> bool:
         if self.model_spec is ValidationError:
@@ -192,7 +219,10 @@ class PydanticCompiledModel:
 
         return self._type_adapter.validate_json(value)
 
-    def dump_json(self, value: Any) -> bytes:
+    def dump_json(
+        self,
+        value: Any,
+    ) -> bytes:
         if isinstance(value, BaseModel):
             return value.model_dump_json().encode("utf-8")
 
