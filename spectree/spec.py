@@ -2,14 +2,7 @@ import weakref
 from collections import defaultdict
 from functools import wraps
 from importlib import import_module
-from typing import (
-    Any,
-    Callable,
-    Mapping,
-    Sequence,
-    Dict,
-    Optional
-)
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 from spectree._types import (
     HookHandler,
@@ -18,11 +11,11 @@ from spectree._types import (
     NestedNamingStrategy,
 )
 from spectree.config import Configuration, ModeEnum
+from spectree.endpoint import REQUEST_MODEL_ARGUMENTS, EndpointSpec
 from spectree.metadata import (
     FunctionDecorator,
     is_validated_function,
     iter_wrapped_functions,
-    register_validated_function,
 )
 from spectree.model_adapter import ModelSpec, get_pydantic_model_adapter
 from spectree.model_adapter.protocol import SchemaMode
@@ -37,15 +30,10 @@ from spectree.utils import (
     get_nested_key,
     get_request_model_hints,
     get_security,
+    json_compatible_deepcopy,
     parse_comments,
     parse_name,
-    parse_params,
-    parse_request,
-    parse_resp,
-    json_compatible_deepcopy,
-    get_request_model_hints
 )
-from spectree.endpoint import EndpointSpec, REQUEST_MODEL_ARGUMENTS
 
 
 class SpecTree:
@@ -247,15 +235,15 @@ class SpecTree:
             request_model_keys: dict[str, str] = {}
 
             for name, model in zip(
-                    REQUEST_MODEL_ARGUMENTS,
-                    (
-                            query,
-                            json,
-                            form,
-                            headers,
-                            cookies,
-                    ),
-                    strict=True,
+                REQUEST_MODEL_ARGUMENTS,
+                (
+                    query,
+                    json,
+                    form,
+                    headers,
+                    cookies,
+                ),
+                strict=True,
             ):
                 if model is None:
                     continue
@@ -274,8 +262,7 @@ class SpecTree:
 
                 compiled_resp.add_model(
                     validation_error_status,
-                    self.validation_error_model
-                    or self.model_adapter.validation_error,
+                    self.validation_error_model or self.model_adapter.validation_error,
                     replace=False,
                 )
 
@@ -342,8 +329,7 @@ class SpecTree:
 
                 compiled_resp.add_model(
                     validation_error_status,
-                    self.validation_error_model
-                    or self.model_adapter.validation_error,
+                    self.validation_error_model or self.model_adapter.validation_error,
                     replace=False,
                 )
 
@@ -419,9 +405,9 @@ class SpecTree:
         return decorate_validation
 
     def _add_model(
-            self,
-            model: ModelSpec,
-            mode: SchemaMode = "validation",
+        self,
+        model: ModelSpec,
+        mode: SchemaMode = "validation",
     ) -> str:
         """
         Register a model schema and return its OpenAPI component name.
@@ -567,8 +553,7 @@ class SpecTree:
             existing = output.get(component_name)
             if existing is not None and existing != nested_schema:
                 raise ValueError(
-                    f"Nested schema collision for component "
-                    f"{component_name!r}."
+                    f"Nested schema collision for component {component_name!r}."
                 )
 
             output[component_name] = nested_schema

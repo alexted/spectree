@@ -1,6 +1,7 @@
 import pytest
 
 from spectree.schema_registry import SchemaCollisionError, SchemaRegistry
+from spectree.utils import json_compatible_deepcopy
 
 
 def create_registry():
@@ -334,6 +335,34 @@ def test_serialization_suffix_collision_is_reported():
         )
 
 
+def test_model_name_matching_serialization_suffix_is_not_reassigned():
+    registry = create_registry()
+
+    serialization_model = {
+        "name": "User",
+    }
+    conflicting_model = {
+        "name": "User.serialization",
+    }
+
+    registry.register(
+        serialization_model,
+        "serialization",
+        {
+            "type": "object",
+        },
+    )
+
+    with pytest.raises(SchemaCollisionError):
+        registry.register(
+            conflicting_model,
+            "validation",
+            {
+                "type": "object",
+            },
+        )
+
+
 def test_registration_order_produces_identical_registry_state():
     model = {"name": "User"}
 
@@ -347,18 +376,34 @@ def test_registration_order_produces_identical_registry_state():
     }
 
     first = create_registry()
-    first.register(model, "validation", validation_schema)
-    first.register(model, "serialization", serialization_schema)
+    first.register(
+        model,
+        "validation",
+        validation_schema,
+    )
+    first.register(
+        model,
+        "serialization",
+        serialization_schema,
+    )
 
     second = create_registry()
-    second.register(model, "serialization", serialization_schema)
-    second.register(model, "validation", validation_schema)
+    second.register(
+        model,
+        "serialization",
+        serialization_schema,
+    )
+    second.register(
+        model,
+        "validation",
+        validation_schema,
+    )
 
     assert first.snapshot() == second.snapshot()
     assert tuple(first) == tuple(second)
 
 
-def test_renamed_serialization_component_updates_nested_refs():
+def test_serialization_first_uses_serialization_component_name():
     registry = create_registry()
 
     model = {"name": "User"}
@@ -377,12 +422,7 @@ def test_renamed_serialization_component_updates_nested_refs():
         },
     }
 
-    validation_schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-        },
-    }
+    validation_schema = user_schema()
 
     serialization = registry.register(
         model,
@@ -390,19 +430,16 @@ def test_renamed_serialization_component_updates_nested_refs():
         serialization_schema,
     )
 
-    assert serialization == "User.serialization"
-
     validation = registry.register(
         model,
         "validation",
         validation_schema,
     )
 
+    assert serialization == "User.serialization"
     assert validation == "User"
 
-    assert registry[
-        "User.serialization"
-    ]["properties"]["profile"]["$ref"] == (
+    assert registry["User.serialization"]["properties"]["profile"]["$ref"] == (
         "#/components/schemas/User.serialization.Profile"
     )
 
@@ -428,9 +465,7 @@ def test_raw_schema_is_preserved_internally():
     registry.register(model, "validation", schema)
 
     stored = next(
-        record
-        for record in registry._records.values()
-        if record.model is model
+        record for record in registry._records.values() if record.model is model
     )
 
     assert stored.raw_schema["properties"]["profile"]["$ref"] == (
@@ -440,3 +475,159 @@ def test_raw_schema_is_preserved_internally():
     assert stored.schema["properties"]["profile"]["$ref"] == (
         "#/components/schemas/User.Profile"
     )
+
+
+def test_failed_registration_does_not_mutate_input_schema():
+    registry = create_registry()
+
+    first_model = {"name": "User"}
+    second_model = {"name": "User"}
+
+    first_schema = user_schema()
+    second_schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "integer"},
+        },
+    }
+
+    registry.register(
+        first_model,
+        "validation",
+        first_schema,
+    )
+
+    original_second_schema = json_compatible_deepcopy(
+        second_schema,
+    )
+
+    with pytest.raises(SchemaCollisionError):
+        registry.register(
+            second_model,
+            "validation",
+            second_schema,
+        )
+
+    assert second_schema == original_second_schema
+
+
+def test_shared_schema_modes_do_not_share_mutable_mapping():
+    registry = create_registry()
+
+    model = {"name": "User"}
+    schema = user_schema()
+
+    validation_name = registry.register(
+        model,
+        "validation",
+        schema,
+    )
+    serialization_name = registry.register(
+        model,
+        "serialization",
+        schema,
+    )
+
+    assert validation_name == "User"
+    assert serialization_name == "User"
+
+    first = registry["User"]
+    first["properties"]["name"]["description"] = "changed"
+
+    second = registry["User"]
+
+    assert "description" not in second["properties"]["name"]
+
+
+def test_iteration_is_sorted_independently_of_registration_order():
+    first = create_registry()
+    first.register(
+        {"name": "B"},
+        "validation",
+        {"type": "object"},
+    )
+    first.register(
+        {"name": "A"},
+        "validation",
+        {"type": "object"},
+    )
+
+    second = create_registry()
+    second.register(
+        {"name": "A"},
+        "validation",
+        {"type": "object"},
+    )
+    second.register(
+        {"name": "B"},
+        "validation",
+        {"type": "object"},
+    )
+
+    assert tuple(first) == ("A", "B")
+    assert tuple(second) == ("A", "B")
+
+
+def test_empty_component_name_from_naming_strategy_is_rejected():
+    registry = SchemaRegistry(
+        naming_strategy=lambda model: "",
+        nested_naming_strategy=lambda parent, child: f"{parent}.{child}",
+    )
+
+    with pytest.raises(ValueError):
+        registry.register(
+            {"name": "User"},
+            "validation",
+            {"type": "object"},
+        )
+
+
+def test_empty_nested_component_name_from_naming_strategy_is_rejected():
+    registry = SchemaRegistry(
+        naming_strategy=lambda model: model["name"],
+        nested_naming_strategy=lambda parent, child: "",
+    )
+
+    with pytest.raises(ValueError):
+        registry.register(
+            {"name": "User"},
+            "validation",
+            {
+                "type": "object",
+                "$defs": {
+                    "Child": {
+                        "type": "object",
+                    },
+                },
+            },
+        )
+
+
+def test_normalization_does_not_mutate_adapter_schema():
+    registry = create_registry()
+
+    model = {"name": "User"}
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "profile": {
+                "$ref": "#/components/schemas/Profile",
+            },
+        },
+        "$defs": {
+            "Profile": {
+                "type": "object",
+            },
+        },
+    }
+
+    original = json_compatible_deepcopy(schema)
+
+    registry.register(
+        model,
+        "validation",
+        schema,
+    )
+
+    assert schema == original

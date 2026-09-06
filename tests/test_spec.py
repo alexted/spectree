@@ -17,7 +17,6 @@ from spectree.plugins.flask_plugin import FlaskPlugin
 from spectree.spec import SpecTree
 from spectree.utils import (
     get_model_key,
-    json_compatible_deepcopy,
 )
 from tests.common import get_paths
 from tests.common_dataclass import (
@@ -515,9 +514,7 @@ def test_validation_and_serialization_models_have_distinct_schema_components(
     api = SpecTree(
         "flask",
         naming_strategy=lambda model: (
-            "ModeAwareModel"
-            if model is target_model
-            else "ValidationError"
+            "ModeAwareModel" if model is target_model else "ValidationError"
         ),
         model_adapter=model_case.adapter,
     )
@@ -568,35 +565,27 @@ def test_validation_and_serialization_models_have_distinct_schema_components(
     with app.app_context():
         spec = api.spec
 
-    assert (
-        spec["paths"]["/users"]["post"]["requestBody"]["content"][
-            "application/json"
-        ]["schema"]
-        == {"$ref": "#/components/schemas/ModeAwareModel"}
-    )
+    assert spec["paths"]["/users"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ModeAwareModel"}
 
-    assert (
-        spec["paths"]["/users"]["post"]["responses"]["200"]["content"][
-            "application/json"
-        ]["schema"]
-        == {"$ref": "#/components/schemas/ModeAwareModel.serialization"}
-    )
+    assert spec["paths"]["/users"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ModeAwareModel.serialization"}
 
     assert "ModeAwareModel" in spec["components"]["schemas"]
     assert "ModeAwareModel.serialization" in spec["components"]["schemas"]
 
-    assert (
-        spec["components"]["schemas"]["ModeAwareModel"]["properties"]
-        == {"name": {"type": "string"}}
-    )
+    assert spec["components"]["schemas"]["ModeAwareModel"]["properties"] == {
+        "name": {"type": "string"}
+    }
 
-    assert (
-        spec["components"]["schemas"]["ModeAwareModel.serialization"]["properties"]
-        == {
-            "name": {"type": "string"},
-            "display_name": {"type": "string"},
-        }
-    )
+    assert spec["components"]["schemas"]["ModeAwareModel.serialization"][
+        "properties"
+    ] == {
+        "name": {"type": "string"},
+        "display_name": {"type": "string"},
+    }
 
 
 def test_generate_spec_is_deterministic_and_does_not_mutate_registry(
@@ -611,9 +600,7 @@ def test_generate_spec_is_deterministic_and_does_not_mutate_registry(
     api = SpecTree(
         "flask",
         naming_strategy=lambda model: (
-            "QueryModel"
-            if model is target_model
-            else "ValidationError"
+            "QueryModel" if model is target_model else "ValidationError"
         ),
         nested_naming_strategy=lambda parent, child: f"{parent}.{child}",
         model_adapter=model_case.adapter,
@@ -804,7 +791,7 @@ def test_runtime_does_not_resolve_unrelated_annotations():
 
     def endpoint(
         json: DemoModel,
-        dependency: "CompletelyNonExistentType",
+        dependency: "CompletelyNonExistentType",  # noqa F821
     ):
         return {"ok": True}
 
@@ -825,6 +812,7 @@ def test_runtime_does_not_resolve_unrelated_annotations():
         )
 
     assert response.status_code != 500
+
 
 def test_runtime_ignores_unresolvable_return_annotation():
     app = Flask(__name__)

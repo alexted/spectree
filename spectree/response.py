@@ -2,7 +2,7 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, TypeAlias, Optional
+from typing import Any, TypeAlias
 
 from spectree._types import ModelAdapterType, NamingStrategy
 from spectree.model_adapter import ModelClass
