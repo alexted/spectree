@@ -85,10 +85,7 @@ def _is_instance_of_model(
         return value is None
 
     if origin in (Union, UnionType):
-        return any(
-            _is_instance_of_model(value, option)
-            for option in get_args(model)
-        )
+        return any(_is_instance_of_model(value, option) for option in get_args(model))
 
     if origin is Literal:
         return any(value == literal for literal in get_args(model))
@@ -98,10 +95,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, list)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is tuple:
@@ -111,17 +105,11 @@ def _is_instance_of_model(
             return False
 
         if len(args) == 2 and args[1] is Ellipsis:
-            return all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            return all(_is_instance_of_model(item, args[0]) for item in value)
 
-        return (
-            len(value) == len(args)
-            and all(
-                _is_instance_of_model(item, item_model)
-                for item, item_model in zip(value, args, strict=True)
-            )
+        return len(value) == len(args) and all(
+            _is_instance_of_model(item, item_model)
+            for item, item_model in zip(value, args, strict=True)
         )
 
     if origin is dict:
@@ -143,10 +131,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, set)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is frozenset:
@@ -155,10 +140,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, frozenset)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is not None:
@@ -176,10 +158,7 @@ class PydanticCompiledModel:
     def __init__(self, model_spec: ModelSpec) -> None:
         self.model_spec = model_spec
         self._is_base_model = _is_base_model_type(model_spec)
-        self._is_dataclass = (
-            isinstance(model_spec, type)
-            and is_dataclass(model_spec)
-        )
+        self._is_dataclass = isinstance(model_spec, type) and is_dataclass(model_spec)
 
         if self._is_base_model or model_spec is ValidationError:
             self._type_adapter = None
@@ -335,10 +314,7 @@ class PydanticModelAdapter(
             )
 
         if isinstance(value, (list, tuple)):
-            return any(
-                self.is_partial_model_instance(item)
-                for item in value
-            )
+            return any(self.is_partial_model_instance(item) for item in value)
 
         return False
 
