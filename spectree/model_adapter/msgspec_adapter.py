@@ -221,21 +221,5 @@ class MsgspecModelAdapter(
         ]
 
 
-def _model_name_for_generated_type(
-    model: ModelSpec,
-) -> str:
-    name = getattr(model, "__name__", None)
-    if isinstance(name, str) and name:
-        return name
-
-    origin = getattr(model, "__origin__", None)
-    if origin is not None:
-        origin_name = getattr(origin, "__name__", None)
-        if isinstance(origin_name, str) and origin_name:
-            args = getattr(model, "__args__", ())
-            if args:
-                argument_name = _model_name_for_generated_type(args[0])
-                return f"{argument_name}{origin_name.title()}"
-            return origin_name.title()
-
+def _model_name_for_generated_type(model: ModelSpec) -> str:
     return get_model_key(model).split(".", 1)[0]

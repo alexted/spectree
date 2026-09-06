@@ -457,3 +457,54 @@ def test_model_spec_json_roundtrip(model_case, spec_factory):
         restored,
         spec,
     )
+
+
+def test_model_key_is_deterministic_for_object_metadata():
+    class Metadata:
+        def __init__(self, value: str):
+            self.value = value
+
+    first = get_model_key(
+        Annotated[
+            SimpleModel,
+            Metadata("test"),
+        ]
+    )
+    second = get_model_key(
+        Annotated[
+            SimpleModel,
+            Metadata("test"),
+        ]
+    )
+
+    assert first == second
+
+
+def test_model_key_changes_when_annotated_metadata_changes():
+    class Metadata:
+        def __init__(self, value: str):
+            self.value = value
+
+    first = get_model_key(
+        Annotated[
+            SimpleModel,
+            Metadata("first"),
+        ]
+    )
+    second = get_model_key(
+        Annotated[
+            SimpleModel,
+            Metadata("second"),
+        ]
+    )
+
+    assert first != second
+
+
+def test_model_key_is_deterministic_for_nested_annotated_generic():
+    spec = Annotated[
+        list[dict[str, SimpleModel]],
+        "metadata",
+    ]
+
+    assert get_model_key(spec) == get_model_key(spec)

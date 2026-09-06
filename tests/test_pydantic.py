@@ -119,3 +119,34 @@ def test_pydantic_annotated_model_spec(model_adapter):
     )
 
     assert isinstance(value, SimpleModel)
+
+
+def test_pydantic_generic_model_json_roundtrip(model_adapter):
+    spec = list[SimpleModel]
+
+    value = model_adapter.validate_obj(
+        spec,
+        [
+            {"user_id": 1},
+            {"user_id": 2},
+        ],
+    )
+
+    payload = model_adapter.dump_json(value)
+
+    restored = model_adapter.validate_json(
+        spec,
+        payload,
+    )
+
+    assert model_adapter.is_model_instance(
+        restored,
+        spec,
+    )
+
+
+def test_pydantic_rejects_unsupported_nested_generic(model_adapter):
+    class Unsupported:
+        value: int
+
+    assert model_adapter.is_model_type(list[Unsupported]) is False

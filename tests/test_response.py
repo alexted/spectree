@@ -266,3 +266,29 @@ def test_response_accepts_nested_generic_model_spec_with_pydantic():
     )
 
     assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_annotated_list_model():
+    response = Response(
+        HTTP_200=Annotated[
+            list[DemoModel],
+            "metadata",
+        ],
+    )
+
+    compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_annotated_nested_generic_model():
+    response = Response(
+        HTTP_200=Annotated[
+            list[dict[str, DemoModel]],
+            "metadata",
+        ],
+    )
+
+    compiled = response.copy_for_model_adapter(get_pydantic_model_adapter())
+
+    assert compiled.find_model(200) is not None
