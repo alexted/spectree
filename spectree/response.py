@@ -42,9 +42,9 @@ class Response:
     :py:meth:`SpecTree.validate<spectree.spec.SpecTree.validate>` method.
 
     :param codes: list of HTTP status code, format('HTTP_[0-9]{3}'), 'HTTP_200'
-    :param code_models: dict of <HTTP status code>: <model class> or None or
-        a two element tuple of (<model class> or None) as the first item and
-        a custom status code description string as the second item.
+    :param code_models: mapping of HTTP status code to a supported model
+        specification, None, or a two-element tuple containing a model
+        specification and a custom status-code description.
 
     examples:
 
