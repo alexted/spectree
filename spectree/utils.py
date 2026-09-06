@@ -177,66 +177,83 @@ def hash_module_path(module_path: str):
     return sha1(module_path.encode()).hexdigest()[:7]
 
 
+def _annotated_expression_name(value: Any) -> str:
+    args = get_args(value)
+
+    for metadata in reversed(args[1:]):
+        title = getattr(metadata, "title", None)
+        if title:
+            return str(title)
+
+    return _model_expression_name(args[0])
+
+
+def _list_expression_name(value: Any) -> str:
+    args = get_args(value)
+
+    if not args:
+        return "AnyList"
+
+    return f"{_model_expression_name(args[0])}List"
+
+
+def _dict_expression_name(value: Any) -> str:
+    args = get_args(value)
+
+    if len(args) != 2:
+        return "Dict"
+
+    return f"Dict{_model_expression_name(args[0])}{_model_expression_name(args[1])}"
+
+
+def _tuple_expression_name(value: Any) -> str:
+    args = get_args(value)
+
+    if not args:
+        return "Tuple"
+
+    if args[-1] is Ellipsis:
+        return f"{_model_expression_name(args[0])}Tuple"
+
+    return "Tuple" + "".join(_model_expression_name(arg) for arg in args)
+
+
+def _union_expression_name(value: Any) -> str:
+    args = get_args(value)
+    non_none_args = tuple(arg for arg in args if arg is not type(None))
+
+    if len(args) == 2 and len(non_none_args) == 1:
+        return f"{_model_expression_name(non_none_args[0])}Optional"
+
+    return "Union" + "".join(_model_expression_name(arg) for arg in args)
+
+
 def _model_expression_name(value: Any) -> str:
     origin = get_origin(value)
-    name: str | None = None
 
-    if origin is Annotated:
-        args = get_args(value)
-        for metadata in reversed(args[1:]):
-            title = getattr(metadata, "title", None)
-            if title:
-                name = str(title)
-                break
+    handlers = {
+        Annotated: _annotated_expression_name,
+        list: _list_expression_name,
+        dict: _dict_expression_name,
+        tuple: _tuple_expression_name,
+    }
 
-        if name is None and args:
-            name = _model_expression_name(args[0])
+    handler = handlers.get(origin)
+    if handler is not None:
+        return handler(value)
 
-    elif origin is list:
-        args = get_args(value)
-        item_name = _model_expression_name(args[0]) if args else "Any"
-        name = f"{item_name}List"
+    if origin in (Union, UnionType):
+        return _union_expression_name(value)
 
-    elif origin is dict:
-        args = get_args(value)
-        if len(args) == 2:
-            name = (
-                "Dict"
-                f"{_model_expression_name(args[0])}"
-                f"{_model_expression_name(args[1])}"
-            )
-        else:
-            name = "Dict"
+    name = getattr(value, "__name__", None)
+    if name:
+        return name
 
-    elif origin is tuple:
-        args = get_args(value)
+    origin_name = getattr(origin, "__name__", None)
+    if origin_name:
+        return origin_name
 
-        if not args:
-            name = "Tuple"
-        elif args[-1] is Ellipsis:
-            name = f"{_model_expression_name(args[0])}Tuple"
-        else:
-            name = "Tuple" + "".join(_model_expression_name(arg) for arg in args)
-
-    elif origin in (Union, UnionType):
-        args = get_args(value)
-        non_none_args = tuple(arg for arg in args if arg is not type(None))
-
-        if len(args) == 2 and len(non_none_args) == 1:
-            name = f"{_model_expression_name(non_none_args[0])}Optional"
-        else:
-            name = "Union" + "".join(_model_expression_name(arg) for arg in args)
-
-    if name is None:
-        name = getattr(value, "__name__", None)
-
-    if name is None and origin is not None:
-        name = getattr(origin, "__name__", None)
-
-    if name is None:
-        name = type(value).__name__
-
-    return name
+    return type(value).__name__
 
 
 def get_model_key(model: ModelSpec) -> str:
