@@ -1,7 +1,7 @@
 import re
 from dataclasses import is_dataclass
 from types import UnionType
-from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, TypeAlias, Union, get_args, get_origin
 
 import msgspec
 
@@ -12,7 +12,6 @@ from spectree.model_adapter.protocol import (
 )
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
-
 
 _ERROR_PATH_RE = re.compile(r" - at `(?P<path>.+)`$")
 
@@ -67,16 +66,10 @@ def _is_instance_of_model(
         return value is None
 
     if origin in (Union, UnionType):
-        return any(
-            _is_instance_of_model(value, option)
-            for option in get_args(model)
-        )
+        return any(_is_instance_of_model(value, option) for option in get_args(model))
 
     if origin is Literal:
-        return any(
-            value == literal
-            for literal in get_args(model)
-        )
+        return any(value == literal for literal in get_args(model))
 
     if origin is list:
         args = get_args(model)
@@ -84,10 +77,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, list)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is tuple:
@@ -97,17 +87,11 @@ def _is_instance_of_model(
             return False
 
         if len(args) == 2 and args[1] is Ellipsis:
-            return all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            return all(_is_instance_of_model(item, args[0]) for item in value)
 
-        return (
-            len(value) == len(args)
-            and all(
-                _is_instance_of_model(item, item_model)
-                for item, item_model in zip(value, args, strict=True)
-            )
+        return len(value) == len(args) and all(
+            _is_instance_of_model(item, item_model)
+            for item, item_model in zip(value, args, strict=True)
         )
 
     if origin is dict:
@@ -129,10 +113,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, set)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is frozenset:
@@ -141,10 +122,7 @@ def _is_instance_of_model(
         return (
             isinstance(value, frozenset)
             and len(args) == 1
-            and all(
-                _is_instance_of_model(item, args[0])
-                for item in value
-            )
+            and all(_is_instance_of_model(item, args[0]) for item in value)
         )
 
     if origin is not None:
@@ -297,10 +275,7 @@ class MsgspecModelAdapter(
             )
 
         if isinstance(value, (list, tuple)):
-            return any(
-                self.is_partial_model_instance(item)
-                for item in value
-            )
+            return any(self.is_partial_model_instance(item) for item in value)
 
         return False
 
