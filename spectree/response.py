@@ -2,7 +2,7 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, Optional, TypeAlias
+from typing import Any, Optional, TypeAlias, get_args, get_origin
 
 from spectree._types import ModelAdapterType, NamingStrategy
 from spectree.model_adapter import ModelSpec
@@ -132,10 +132,11 @@ class Response:
         raw_model: ModelSpec,
         model_adapter: ModelAdapterType,
     ) -> ModelSpec:
-        origin_type = getattr(raw_model, "__origin__", None)
+        origin_type = get_origin(raw_model)
 
         if origin_type is list:
-            args = getattr(raw_model, "__args__", ())
+            args = get_args(raw_model)
+
             if len(args) != 1:
                 raise AssertionError(f"invalid response model: {raw_model}")
 

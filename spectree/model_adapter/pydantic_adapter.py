@@ -73,15 +73,16 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     ) -> TypeAdapter[Any]:
         return TypeAdapter(model)
 
-    @classmethod
+    @staticmethod
     def _type_adapter(
-        cls,
         model: ModelSpec,
     ) -> TypeAdapter[Any]:
         try:
-            return cls._cached_type_adapter(model)
+            hash(model)
         except TypeError:
             return TypeAdapter(model)
+
+        return PydanticModelAdapter._cached_type_adapter(model)
 
     @staticmethod
     def _is_base_model_type(
@@ -238,21 +239,5 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         return err.errors(include_context=False)
 
 
-def _model_name_for_generated_type(
-    model: ModelSpec,
-) -> str:
-    name = getattr(model, "__name__", None)
-    if isinstance(name, str) and name:
-        return name
-
-    origin = getattr(model, "__origin__", None)
-    if origin is not None:
-        origin_name = getattr(origin, "__name__", None)
-        if isinstance(origin_name, str) and origin_name:
-            args = getattr(model, "__args__", ())
-            if args:
-                argument_name = _model_name_for_generated_type(args[0])
-                return f"{argument_name}{origin_name.title()}"
-            return origin_name.title()
-
+def _model_name_for_generated_type(model: ModelSpec) -> str:
     return get_model_key(model).split(".", 1)[0]
