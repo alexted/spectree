@@ -10,6 +10,7 @@ from types import FunctionType, UnionType
 from typing import (
     Annotated,
     Any,
+    Optional,
     Union,
     get_args,
     get_origin,
@@ -176,33 +177,73 @@ def hash_module_path(module_path: str):
     return sha1(module_path.encode()).hexdigest()[:7]
 
 
+def _model_expression_name(value: Any) -> str:
+    origin = get_origin(value)
+
+    if origin is Annotated:
+        args = get_args(value)
+        for metadata in reversed(args[1:]):
+            title = getattr(metadata, "title", None)
+            if title:
+                return str(title)
+        return _model_expression_name(args[0])
+
+    if origin is list:
+        args = get_args(value)
+        item_name = _model_expression_name(args[0]) if args else "Any"
+        return f"{item_name}List"
+
+    if origin is dict:
+        args = get_args(value)
+        if len(args) == 2:
+            return (
+                "Dict"
+                f"{_model_expression_name(args[0])}"
+                f"{_model_expression_name(args[1])}"
+            )
+        return "Dict"
+
+    if origin is tuple:
+        args = get_args(value)
+        if not args:
+            return "Tuple"
+
+        if args[-1] is Ellipsis:
+            return f"{_model_expression_name(args[0])}Tuple"
+
+        return "Tuple" + "".join(_model_expression_name(arg) for arg in args)
+
+    if origin in (Union, UnionType):
+        args = get_args(value)
+
+        non_none_args = tuple(arg for arg in args if arg is not type(None))
+
+        if len(args) == 2 and len(non_none_args) == 1:
+            return f"{_model_expression_name(non_none_args[0])}Optional"
+
+        return "Union" + "".join(_model_expression_name(arg) for arg in args)
+
+    name = getattr(value, "__name__", None)
+    if name:
+        return name
+
+    if origin is not None:
+        origin_name = getattr(origin, "__name__", None)
+        if origin_name:
+            return origin_name
+
+    return type(value).__name__
+
+
 def get_model_key(model: ModelSpec) -> str:
     """
-    generate model name suffixed by short hashed path (instead of its path to
-    avoid code-structure leaking)
-
-    :param model: query, json, headers or cookies from request or response
+    Generate a deterministic OpenAPI component name for a model/type
+    expression without exposing the full Python module path.
     """
+    model_name = _model_expression_name(model)
 
-    def get_name(value: Any) -> str:
-        origin = get_origin(value)
-        if origin is Annotated:
-            args = get_args(value)
-            # Nested Annotated aliases are flattened by typing; the outermost
-            # metadata appears last and should define the public schema name.
-            for metadata in reversed(args[1:]):
-                title = getattr(metadata, "title", None)
-                if title:
-                    return str(title)
-            return get_name(args[0])
-        if origin is list:
-            args = get_args(value)
-            item_name = get_name(args[0]) if args else "Any"
-            return f"{item_name}List"
-        return value.__name__
-
-    model_name = get_name(model)
     module_path = model.__module__ if get_origin(model) is None else repr(model)
+
     return f"{model_name}.{hash_module_path(module_path=module_path)}"
 
 
