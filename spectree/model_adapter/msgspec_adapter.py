@@ -1,11 +1,11 @@
 import re
-from dataclasses import asdict, is_dataclass
+from dataclasses import is_dataclass
 from types import UnionType
 from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
 
 import msgspec
 
-from spectree.model_adapter.protocol import ModelAdapter, SchemaMode, ModelSpec
+from spectree.model_adapter.protocol import ModelAdapter, ModelSpec, SchemaMode
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
 
@@ -224,13 +224,11 @@ class MsgspecModelAdapter(
 ):
     """Msgspec model adapter."""
 
-    def __init__(self, model_spec: ModelSpec) -> None:
-        self.model_spec = model_spec
-
-    def is_instance(self, value: Any) -> bool:
-        model = self.model_spec
-        origin = get_origin(model)
-        self._compiled_models: dict[ModelSpec, MsgspecCompiledModel] = {}
+    def __init__(self) -> None:
+        self._compiled_models: dict[
+            ModelSpec,
+            MsgspecCompiledModel,
+        ] = {}
 
     def compile(
         self,
@@ -256,10 +254,7 @@ class MsgspecModelAdapter(
 
         try:
             msgspec.inspect.type_info(value)
-        except (
-            TypeError,
-            ValueError,
-        ):
+        except (TypeError, ValueError):
             return False
 
         return True
@@ -297,16 +292,16 @@ class MsgspecModelAdapter(
         return False
 
     def validate_obj(
-            self,
-            model: ModelSpec,
-            value: Any,
+        self,
+        model: ModelSpec,
+        value: Any,
     ) -> Any:
         return self.compile(model).validate_obj(value)
 
     def validate_json(
-            self,
-            model: ModelSpec,
-            value: bytes,
+        self,
+        model: ModelSpec,
+        value: bytes,
     ) -> Any:
         return self.compile(model).validate_json(value)
 
@@ -314,7 +309,7 @@ class MsgspecModelAdapter(
         self,
         value: Any,
     ) -> bytes:
-        return self.encoder.encode(value)
+        return msgspec.json.encode(value)
 
     def make_root_model(
         self,
@@ -344,11 +339,11 @@ class MsgspecModelAdapter(
         )
 
     def json_schema(
-            self,
-            model: ModelSpec,
-            *,
-            ref_template: str,
-            mode: SchemaMode = "validation",
+        self,
+        model: ModelSpec,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
         return self.compile(model).json_schema(
             ref_template=ref_template,

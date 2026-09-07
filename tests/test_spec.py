@@ -907,8 +907,11 @@ def test_response_can_produce_independent_bound_copies(
 def test_endpoint_spec_is_immutable():
     api = SpecTree()
 
+    class Query:
+        pass
+
     @api.validate(
-        query=dict,
+        query=Query,
         tags=("users",),
         operation_id="users_list",
     )
@@ -917,12 +920,11 @@ def test_endpoint_spec_is_immutable():
 
     endpoint_spec = endpoint._endpoint_spec
 
-    assert endpoint_spec.query is dict
-    assert endpoint_spec.tags == ("users",)
-    assert endpoint_spec.operation_id == "users_list"
-
     with pytest.raises((AttributeError, TypeError)):
         endpoint_spec.query = list
+
+    with pytest.raises((AttributeError, TypeError)):
+        endpoint_spec.request_model_keys = ()
 
 
 def test_reusing_validate_decorator_does_not_leak_endpoint_models():
@@ -952,7 +954,6 @@ def test_reusing_validate_decorator_does_not_leak_endpoint_models():
 
     assert api.get_endpoint_spec(first) is first._endpoint_spec
     assert api.get_endpoint_spec(second) is second._endpoint_spec
-
 
 
 def test_explicit_endpoint_models_are_isolated_between_decorations():
@@ -999,6 +1000,7 @@ def test_endpoint_spec_is_used_as_runtime_source_of_truth():
 
     assert endpoint_spec.operation_id == "stable-operation"
     assert endpoint_spec.tags == ("stable",)
+
 
 def test_get_endpoint_spec_handles_wrapped_functions():
     api = SpecTree()
@@ -1063,3 +1065,84 @@ def test_endpoint_metadata_remains_backward_compatible():
     assert metadata.security == endpoint.security
     assert metadata.deprecated is endpoint.deprecated
     assert metadata.operation_id == endpoint.operation_id
+
+
+def test_skip_validation_warns_for_request_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    with pytest.warns(UserWarning, match="skip_validation"):
+
+        @api.validate(skip_validation=True)
+        def annotated(query: Query):
+            return query
+
+    assert annotated._endpoint_spec.query is Query
+    assert annotated._endpoint_spec.injected_arguments == {"query"}
+
+
+def test_endpoint_openapi_rendering_uses_endpoint_spec_not_legacy_metadata():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(
+        query=Query,
+        operation_id="endpoint-operation",
+        tags=("endpoint-tag",),
+    )
+    def endpoint():
+        return None
+
+    endpoint.operation_id = "legacy-operation"
+    endpoint.tags = ("legacy-tag",)
+
+    assert endpoint._endpoint_spec.operation_id == "endpoint-operation"
+    assert endpoint._endpoint_spec.tags == ("endpoint-tag",)
+
+
+def test_endpoint_spec_contains_resolved_schema_keys():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(query=Query)
+    def endpoint(query: Query):
+        return query
+
+    key = endpoint._endpoint_spec.model_key_for("query")
+
+    assert key is not None
+    assert key == endpoint.query
+    assert endpoint._endpoint_spec.model_key_for("json") is None
+
+
+def test_reusing_validate_decorator_does_not_leak_endpoint_state():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate()
+
+    @decorator
+    def first(query: FirstQuery):
+        return query
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+    assert first._endpoint_spec is not second._endpoint_spec
+
+    assert first._endpoint_spec.model_key_for("query") == first.query
+    assert second._endpoint_spec.model_key_for("query") == second.query

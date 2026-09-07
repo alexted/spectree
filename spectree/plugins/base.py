@@ -57,11 +57,11 @@ class BasePlugin(Generic[BackendRoute]):
         raise NotImplementedError
 
     def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         """
         Validate request/response and invoke the endpoint using

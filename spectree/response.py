@@ -62,42 +62,7 @@ class Response:
         *codes: str,
         **code_models: ResponseModelConfig,
     ) -> None:
-        self.model_adapter: ModelAdapterType | None = None
-        self.codes: list[str] = []
-        self._raw_code_models: dict[str, Any] = {}
-
-        for code in codes:
-            assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
-            self.codes.append(code)
-
-        self.code_models: dict[str, ModelSpec] = {}
-        self.code_descriptions: dict[str, str | None] = {}
         self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        for code, model_and_description in code_models.items():
-            assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
-            description: str | None = None
-            if isinstance(model_and_description, tuple):
-                assert len(model_and_description) == 2, (
-                    "unexpected number of arguments for a tuple of "
-                    "response model and HTTP status code description"
-                )
-                model = model_and_description[0]
-                description = model_and_description[1]
-            else:
-                model = model_and_description
-
-            if model is not None:
-                self._raw_code_models[code] = model
-                assert description is None or isinstance(description, str), (
-                    "invalid HTTP status code description"
-                )
-            else:
-                self.codes.append(code)
-
-            if description is not None:
-                self.code_descriptions[code] = description
 
     def copy_for_model_adapter(
         self,
