@@ -1146,3 +1146,148 @@ def test_reusing_validate_decorator_does_not_leak_endpoint_state():
 
     assert first._endpoint_spec.model_key_for("query") == first.query
     assert second._endpoint_spec.model_key_for("query") == second.query
+
+
+def test_spec_cache_is_invalidated_after_new_endpoint():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+    api.register(app)
+
+    with app.app_context():
+        first_spec = api.spec
+
+    @app.route("/new")
+    @api.validate()
+    def new_endpoint():
+        return None
+
+    with app.app_context():
+        second_spec = api.spec
+
+    assert first_spec is not second_spec
+    assert "/new" not in first_spec["paths"]
+    assert "/new" in second_spec["paths"]
+
+
+def test_endpoint_spec_operation_id_is_used_in_generated_spec():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/users")
+    @api.validate(operation_id="users-list")
+    def users():
+        return {"ok": True}
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/users"]["get"]
+
+    assert operation["operationId"] == "users-list"
+
+
+def test_endpoint_spec_metadata_is_not_taken_from_mutated_legacy_attributes():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/users")
+    @api.validate(
+        operation_id="users-list",
+        tags=("users",),
+        deprecated=True,
+    )
+    def users():
+        return {"ok": True}
+
+    users.operation_id = "legacy-operation"
+    users.tags = ("legacy-tag",)
+    users.deprecated = False
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/users"]["get"]
+
+    assert operation["operationId"] == "users-list"
+    assert operation["tags"] == ["users"]
+    assert operation["deprecated"] is True
+
+
+def test_same_validate_decorator_keeps_independent_endpoint_specs():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate()
+
+    @decorator
+    def first(query: FirstQuery):
+        return query
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec is not second._endpoint_spec
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+    assert first._endpoint_spec.model_key_for("query") == first.query
+    assert second._endpoint_spec.model_key_for("query") == second.query
+
+
+def test_endpoint_spec_does_not_resolve_unrelated_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    def endpoint(
+        query: Query,
+        dependency: "UnresolvableDependency",  # noqa: F821
+    ):
+        return query
+
+    decorated = api.validate()(endpoint)
+
+    assert decorated._endpoint_spec.query is Query
+    assert decorated._endpoint_spec.injected_arguments == {"query"}
+
+
+def test_endpoint_spec_isolated_when_annotation_overrides_explicit_model():
+    api = SpecTree()
+
+    class ExplicitQuery:
+        pass
+
+    class AnnotatedQuery:
+        pass
+
+    decorator = api.validate(query=ExplicitQuery)
+
+    @decorator
+    def endpoint(query: AnnotatedQuery):
+        return query
+
+    assert endpoint._endpoint_spec.query is AnnotatedQuery
+
+
+def test_non_endpoint_routes_keep_backend_operation_id_resolution():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/plain")
+    def plain():
+        return {"ok": True}
+
+    plain.operation_id = "plain-operation"
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/plain"]["get"]
+
+    assert operation["operationId"] == "plain-operation"

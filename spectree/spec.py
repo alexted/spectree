@@ -119,6 +119,8 @@ class SpecTree:
             weakref.WeakKeyDictionary()
         )
 
+        self._spec: dict[str, Any] | None = None
+
         if app:
             self.register(app)
 
@@ -130,11 +132,11 @@ class SpecTree:
         self.backend.register_route(self.app)
 
     @property
-    def spec(self):
+    def spec(self) -> dict[str, Any]:
         """
-        get the OpenAPI spec
+        Get the OpenAPI spec.
         """
-        if not hasattr(self, "_spec"):
+        if self._spec is None:
             self._spec = self._generate_spec()
         return self._spec
 
@@ -465,12 +467,105 @@ class SpecTree:
             else {}
         )
 
+    def _get_endpoint_metadata(
+        self,
+        func: Callable,
+    ) -> tuple[EndpointSpec | None, FunctionDecorator | None]:
+        endpoint = self.get_endpoint_spec(func)
+        if endpoint is not None:
+            return endpoint, None
+        return None, self.get_function_metadata(func)
+
+    def _collect_tags(
+        self,
+        tags: Sequence[Any],
+        collected: dict[str, Any],
+    ) -> None:
+        for tag in tags:
+            if str(tag) not in collected:
+                collected[str(tag)] = (
+                    tag.to_dict(exclude_none=True)
+                    if isinstance(tag, Tag)
+                    else {"name": tag}
+                )
+
+    def _build_endpoint_operation(
+        self,
+        *,
+        func: Callable,
+        endpoint: EndpointSpec | None,
+        metadata: FunctionDecorator | None,
+        path: str,
+        method: str,
+        parameters: list[Mapping[str, Any]],
+        models: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if endpoint is not None:
+            endpoint_parameters = self._parse_endpoint_params(
+                endpoint,
+                parameters[:],
+                models,
+            )
+            responses = (
+                endpoint.response.generate_spec(self.naming_strategy)
+                if endpoint.response is not None
+                else {}
+            )
+            request_body = self._parse_endpoint_request(endpoint)
+            operation_id = endpoint.operation_id or self.backend.get_func_operation_id(
+                func, path, method
+            )
+            tags = endpoint.tags
+            security = endpoint.security
+            deprecated = endpoint.deprecated
+        else:
+            endpoint_parameters = (
+                metadata.parse_params(parameters[:], models)
+                if metadata is not None
+                else []
+            )
+            responses = (
+                metadata.parse_resp(self.naming_strategy)
+                if metadata is not None
+                else {}
+            )
+            request_body = metadata.parse_request() if metadata is not None else {}
+            operation_id = self.backend.get_func_operation_id(
+                func,
+                path,
+                method,
+            )
+            tags = metadata.tags if metadata is not None else ()
+            security = metadata.security if metadata is not None else None
+            deprecated = metadata.deprecated if metadata is not None else False
+
+        summary, desc = parse_comments(func)
+
+        operation: dict[str, Any] = {
+            "summary": summary or f"{parse_name(func)} <{method}>",
+            "operationId": operation_id,
+            "description": desc or "",
+            "tags": [str(tag) for tag in tags],
+            "parameters": endpoint_parameters,
+            "responses": responses,
+        }
+
+        if security is not None:
+            operation["security"] = get_security(security)
+
+        if deprecated:
+            operation["deprecated"] = deprecated
+
+        if request_body:
+            operation["requestBody"] = request_body
+
+        return operation
+
     def _generate_spec(self) -> dict[str, Any]:
         """
         Generate the OpenAPI specification from compiled endpoint contracts.
         """
         models = json_compatible_deepcopy(dict(self.models))
-
         routes: dict[str, dict[str, Any]] = defaultdict(dict)
         tags: dict[str, Any] = {}
 
@@ -479,17 +574,16 @@ class SpecTree:
                 if self.backend.bypass(func, method) or self.bypass(func):
                     continue
 
-                endpoint = self.get_endpoint_spec(func)
-                metadata = (
-                    self.get_function_metadata(func) if endpoint is None else None
-                )
+                endpoint, metadata = self._get_endpoint_metadata(func)
 
                 path_parameter_descriptions = (
                     endpoint.path_parameter_descriptions
                     if endpoint is not None
-                    else metadata.path_parameter_descriptions
-                    if metadata is not None
-                    else None
+                    else (
+                        metadata.path_parameter_descriptions
+                        if metadata is not None
+                        else None
+                    )
                 )
 
                 path, parameters = self.backend.parse_path(
@@ -497,87 +591,23 @@ class SpecTree:
                     path_parameter_descriptions,
                 )
 
-                name = parse_name(func)
-                summary, desc = parse_comments(func)
+                func_tags = (
+                    endpoint.tags
+                    if endpoint is not None
+                    else (metadata.tags if metadata is not None else ())
+                )
 
-                if endpoint is not None:
-                    func_tags = endpoint.tags
-                else:
-                    func_tags = metadata.tags if metadata is not None else ()
+                self._collect_tags(func_tags, tags)
 
-                for tag in func_tags:
-                    if str(tag) not in tags:
-                        tags[str(tag)] = (
-                            tag.to_dict(exclude_none=True)
-                            if isinstance(tag, Tag)
-                            else {"name": tag}
-                        )
-
-                if endpoint is not None:
-                    operation_id = (
-                        endpoint.operation_id
-                        or f"{method.lower()}_{path.replace('/', '_')}"
-                    )
-                    endpoint_parameters = self._parse_endpoint_params(
-                        endpoint,
-                        parameters[:],
-                        models,
-                    )
-                    responses = (
-                        endpoint.response.generate_spec(self.naming_strategy)
-                        if endpoint.response is not None
-                        else {}
-                    )
-                    request_body = self._parse_endpoint_request(endpoint)
-                else:
-                    operation_id = self.backend.get_func_operation_id(
-                        func,
-                        path,
-                        method,
-                    )
-                    endpoint_parameters = (
-                        metadata.parse_params(
-                            parameters[:],
-                            models,
-                        )
-                        if metadata is not None
-                        else []
-                    )
-                    responses = (
-                        metadata.parse_resp(self.naming_strategy)
-                        if metadata is not None
-                        else {}
-                    )
-                    request_body = (
-                        metadata.parse_request() if metadata is not None else {}
-                    )
-
-                operation: dict[str, Any] = {
-                    "summary": summary or f"{name} <{method}>",
-                    "operationId": operation_id,
-                    "description": desc or "",
-                    "tags": [str(x) for x in func_tags],
-                    "parameters": endpoint_parameters,
-                    "responses": responses,
-                }
-
-                if endpoint is not None:
-                    security = endpoint.security
-                    deprecated = endpoint.deprecated
-                else:
-                    security = metadata.security if metadata is not None else None
-                    deprecated = metadata.deprecated if metadata is not None else False
-
-                if security is not None:
-                    operation["security"] = get_security(security)
-
-                if deprecated:
-                    operation["deprecated"] = deprecated
-
-                if request_body:
-                    operation["requestBody"] = request_body
-
-                routes[path][method.lower()] = operation
+                routes[path][method.lower()] = self._build_endpoint_operation(
+                    func=func,
+                    endpoint=endpoint,
+                    metadata=metadata,
+                    path=path,
+                    method=method,
+                    parameters=parameters,
+                    models=models,
+                )
 
         spec: dict[str, Any] = {
             "openapi": self.config.openapi_version,
