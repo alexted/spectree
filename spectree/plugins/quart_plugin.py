@@ -171,7 +171,7 @@ class QuartPlugin(WerkzeugPlugin):
 
         response, resp_validation_error = await self.validate_response(
             result,
-            endpoint.resp,
+            endpoint.response,
             endpoint.skip_validation,
             endpoint.force_resp_serialize,
         )
