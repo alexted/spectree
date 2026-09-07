@@ -3,7 +3,7 @@ from collections import namedtuple
 from contextvars import ContextVar
 from functools import partial
 from json import JSONDecodeError
-from typing import Any, Optional, Callable
+from typing import Any, Callable
 
 from starlette.convertors import CONVERTOR_TYPES
 from starlette.requests import Request
@@ -112,16 +112,14 @@ class StarlettePlugin(BasePlugin):
         )
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         async def call_with_model_adapter() -> Any:
-            model_adapter_token = _active_model_adapter.set(
-                self.model_adapter
-            )
+            model_adapter_token = _active_model_adapter.set(self.model_adapter)
             try:
                 if inspect.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
@@ -188,10 +186,10 @@ class StarlettePlugin(BasePlugin):
         response = await call_with_model_adapter()
 
         if (
-                not endpoint.skip_validation
-                and endpoint.response
-                and response
-                and not (
+            not endpoint.skip_validation
+            and endpoint.response
+            and response
+            and not (
                 isinstance(response, JSONResponse)
                 and hasattr(response, "_model_class")
                 and response._model_class
@@ -217,8 +215,8 @@ class StarlettePlugin(BasePlugin):
                 resp_validation_error = err
             else:
                 if isinstance(
-                        response_validation_result.payload,
-                        bytes,
+                    response_validation_result.payload,
+                    bytes,
                 ):
                     response.body = response_validation_result.payload
 
