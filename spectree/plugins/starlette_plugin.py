@@ -189,23 +189,23 @@ class StarlettePlugin(BasePlugin):
 
         if (
                 not endpoint.skip_validation
-                and endpoint.resp
+                and endpoint.response
                 and response
                 and not (
                 isinstance(response, JSONResponse)
                 and hasattr(response, "_model_class")
                 and response._model_class
-                == endpoint.resp.find_model(response.status_code)
-        )
+                == endpoint.response.find_model(response.status_code)
+            )
         ):
             try:
                 response_validation_result = validate_response(
                     model_adapter=self.model_adapter,
-                    validation_model=endpoint.resp.find_model(
-                        response.status_code
+                    validation_model=endpoint.response.find_model(
+                        response.status_code,
                     ),
                     response_payload=RawResponsePayload(
-                        payload=response.body
+                        payload=response.body,
                     ),
                     force_serialize=endpoint.force_resp_serialize,
                 )

@@ -113,7 +113,7 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-       """Generate the JSON schema for a model specification."""
+        """Generate the JSON schema for a model specification."""
         ...
 
     def validation_errors(

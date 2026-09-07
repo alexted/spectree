@@ -1,12 +1,12 @@
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from spectree._types import HookHandler
 from spectree.model_adapter import ModelSpec
 from spectree.response import Response
 
 
-REQUEST_MODEL_ARGUMENTS = (
+REQUEST_MODEL_ARGUMENTS: tuple[str, ...] = (
     "query",
     "json",
     "form",
@@ -20,8 +20,9 @@ class EndpointSpec:
     """
     Immutable runtime contract compiled from a SpecTree endpoint declaration.
 
-    Annotation-derived injection is represented by ``injected_arguments``.
-    The runtime plugin must not inspect the original function annotations again.
+    Request-model annotations are resolved once during decoration and stored in
+    ``injected_arguments``. Runtime framework plugins consume this contract
+    directly and must not inspect endpoint annotations.
     """
 
     query: ModelSpec | None
@@ -47,4 +48,6 @@ class EndpointSpec:
     operation_id: str | None
 
     def model_for(self, name: str) -> ModelSpec | None:
+        if name not in REQUEST_MODEL_ARGUMENTS:
+            raise KeyError(name)
         return getattr(self, name)
