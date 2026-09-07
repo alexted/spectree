@@ -1,12 +1,11 @@
 import inspect
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import quart
 from quart import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
-from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import Context, validate_response
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
 from spectree.response import Response
@@ -114,11 +113,11 @@ class QuartPlugin(WerkzeugPlugin):
         return response, resp_validation_error
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         response, req_validation_error, resp_validation_error = (
             None,

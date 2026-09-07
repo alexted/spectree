@@ -12,7 +12,7 @@ from spectree._types import (
     NestedNamingStrategy,
 )
 from spectree.config import Configuration, ModeEnum
-from spectree.endpoint import EndpointSpec, REQUEST_MODEL_ARGUMENTS
+from spectree.endpoint import REQUEST_MODEL_ARGUMENTS, EndpointSpec
 from spectree.metadata import (
     FunctionDecorator,
     is_validated_function,
@@ -41,7 +41,6 @@ from spectree.utils import (
 class SpecTree:
     """
     Interface
-
     :param str backend_name: choose from
         ('flask', 'quart', 'falcon', 'falcon-asgi', 'starlette')
     :param backend: a backend that inherit `SpecTree.plugins.base.BasePlugin`, this will
@@ -61,14 +60,10 @@ class SpecTree:
     :param validation_error_model: The default validation error type to be shown
         in the generated OpenAPI frontend. Make sure it's derived from the model
         adapter (including the ValidationError).
-    :param naming_strategy: A callable that receives a model class and returns
+    :param naming_strategy: A callable that receives a model type/expression and returns
         the top-level component schema name used in the OpenAPI document.
-        For example, ``lambda model: model.__name__.lower()``.
     :param nested_naming_strategy: A callable that receives ``(parent, child)``
-        schema names and returns the component schema name for nested models
-        lifted from ``$defs``. The default includes the parent name to avoid
-        collisions. To share nested models by child name, use
-        ``lambda _parent, child: child``.
+        schema names and returns the component schema name for nested models.
     :param model_adapter: adapter for validation and OpenAPI JSON schema generation.
         Choose from the `spectree.model_adapter`. If not set, will use `pydantic`.
     :param kwargs: init :class:`spectree.config.Configuration`, they can also be
@@ -76,18 +71,18 @@ class SpecTree:
     """
 
     def __init__(
-            self,
-            backend_name: str = "base",
-            backend: type[BasePlugin] | None = None,
-            app: Any = None,
-            before: HookHandler = default_before_handler,
-            after: HookHandler = default_after_handler,
-            validation_error_status: int = 422,
-            validation_error_model: ModelSpec | None = None,
-            naming_strategy: NamingStrategy = get_model_key,
-            nested_naming_strategy: NestedNamingStrategy = get_nested_key,
-            model_adapter: ModelAdapterType | None = None,
-            **kwargs: Any,
+        self,
+        backend_name: str = "base",
+        backend: type[BasePlugin] | None = None,
+        app: Any = None,
+        before: HookHandler = default_before_handler,
+        after: HookHandler = default_after_handler,
+        validation_error_status: int = 422,
+        validation_error_model: ModelSpec | None = None,
+        naming_strategy: NamingStrategy = get_model_key,
+        nested_naming_strategy: NestedNamingStrategy = get_nested_key,
+        model_adapter: ModelAdapterType | None = None,
+        **kwargs: Any,
     ):
         self.naming_strategy = naming_strategy
         self.nested_naming_strategy = nested_naming_strategy
@@ -120,9 +115,9 @@ class SpecTree:
             Callable, FunctionDecorator
         ] = weakref.WeakKeyDictionary()
 
-        self._endpoint_specs: weakref.WeakKeyDictionary[
-            Callable, EndpointSpec
-        ] = weakref.WeakKeyDictionary()
+        self._endpoint_specs: weakref.WeakKeyDictionary[Callable, EndpointSpec] = (
+            weakref.WeakKeyDictionary()
+        )
 
         if app:
             self.register(app)
@@ -130,9 +125,6 @@ class SpecTree:
     def register(self, app: Any):
         """
         register to backend application
-
-        This will be automatically triggered if the app is passed into the
-        init step.
         """
         self.app = app
         self.backend.register_route(self.app)
@@ -145,8 +137,6 @@ class SpecTree:
         if not hasattr(self, "_spec"):
             self._spec = self._generate_spec()
         return self._spec
-
-    # replace bypass/get_function_metadata with:
 
     def bypass(self, func: Callable) -> bool:
         """
@@ -163,7 +153,9 @@ class SpecTree:
         return not owned_by_self and is_validated_function(func)
 
     def get_endpoint_spec(self, func: Callable) -> EndpointSpec | None:
-        """Return the compiled endpoint contract for a validated callable."""
+        """
+        Return the compiled endpoint contract for a validated callable.
+        """
         for candidate in iter_wrapped_functions(func):
             try:
                 endpoint = self._endpoint_specs.get(candidate)
@@ -175,7 +167,10 @@ class SpecTree:
 
         return None
 
-    def get_function_metadata(self, func: Callable) -> FunctionDecorator | None:
+    def get_function_metadata(
+        self,
+        func: Callable,
+    ) -> FunctionDecorator | None:
         """
         Return backward-compatible metadata for a callable validated by this
         SpecTree instance.
@@ -191,26 +186,24 @@ class SpecTree:
 
         return None
 
-    # replace SpecTree.validate with:
-
     def validate(  # noqa: PLR0913, PLR0917
-            self,
-            query: ModelSpec | None = None,
-            json: ModelSpec | None = None,
-            form: ModelSpec | None = None,
-            headers: ModelSpec | None = None,
-            cookies: ModelSpec | None = None,
-            resp: Response | None = None,
-            tags: Sequence = (),
-            security: Any = None,
-            deprecated: bool = False,
-            before: HookHandler | None = None,
-            after: HookHandler | None = None,
-            validation_error_status: int = 0,
-            path_parameter_descriptions: Mapping[str, str] | None = None,
-            skip_validation: bool = False,
-            operation_id: str | None = None,
-            force_resp_serialize: bool = False,
+        self,
+        query: ModelSpec | None = None,
+        json: ModelSpec | None = None,
+        form: ModelSpec | None = None,
+        headers: ModelSpec | None = None,
+        cookies: ModelSpec | None = None,
+        resp: Response | None = None,
+        tags: Sequence = (),
+        security: Any = None,
+        deprecated: bool = False,
+        before: HookHandler | None = None,
+        after: HookHandler | None = None,
+        validation_error_status: int = 0,
+        path_parameter_descriptions: Mapping[str, str] | None = None,
+        skip_validation: bool = False,
+        operation_id: str | None = None,
+        force_resp_serialize: bool = False,
     ) -> Callable:
         """
         Validate request/response and compile an immutable endpoint contract.
@@ -218,6 +211,7 @@ class SpecTree:
         Request annotations are resolved exactly once during decoration.
         Runtime plugins consume the resulting ``EndpointSpec`` directly.
         """
+
         effective_validation_error_status = (
             self.validation_error_status
             if validation_error_status == 0
@@ -226,7 +220,6 @@ class SpecTree:
 
         def decorate_validation(func: Callable):
             resolved_annotations: Mapping[str, Any] = {}
-
             effective_models: dict[str, ModelSpec | None] = {
                 "query": query,
                 "json": json,
@@ -238,15 +231,23 @@ class SpecTree:
             if self.config.annotations:
                 resolved_annotations = get_request_model_hints(func)
 
+                if skip_validation and resolved_annotations:
+                    warnings.warn(
+                        "`skip_validation` cannot be used with `annotations` enabled. "
+                        "The instances of `json`, `headers`, `cookies`, etc. read from "
+                        "the function will be `None`.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
                 for name in REQUEST_MODEL_ARGUMENTS:
                     if name in resolved_annotations:
                         effective_models[name] = resolved_annotations[name]
 
             injected_arguments = frozenset(
                 name
-                for name in resolved_annotations
-                if name in REQUEST_MODEL_ARGUMENTS
-                and effective_models[name] is not None
+                for name in REQUEST_MODEL_ARGUMENTS
+                if name in resolved_annotations and effective_models[name] is not None
             )
 
             request_model_keys: dict[str, str] = {}
@@ -267,10 +268,10 @@ class SpecTree:
                 compiled_resp = resp.copy_for_model_adapter(
                     self.model_adapter,
                 )
+
                 compiled_resp.add_model(
                     effective_validation_error_status,
-                    self.validation_error_model
-                    or self.model_adapter.validation_error,
+                    self.validation_error_model or self.model_adapter.validation_error,
                     replace=False,
                 )
 
@@ -287,6 +288,11 @@ class SpecTree:
                 form=effective_models["form"],
                 headers=effective_models["headers"],
                 cookies=effective_models["cookies"],
+                request_model_keys=tuple(
+                    (name, request_model_keys[name])
+                    for name in REQUEST_MODEL_ARGUMENTS
+                    if name in request_model_keys
+                ),
                 response=compiled_resp,
                 injected_arguments=injected_arguments,
                 before=before if before is not None else self.before,
@@ -319,11 +325,8 @@ class SpecTree:
                 operation_id=endpoint.operation_id,
             )
 
-            try:
-                self._endpoint_specs[func] = endpoint
-                self._function_metadata[func] = metadata
-            except TypeError:
-                pass
+            self._endpoint_specs[func] = endpoint
+            self._function_metadata[func] = metadata
 
             register_validated_function(func)
 
@@ -363,9 +366,7 @@ class SpecTree:
             validation._endpoint_spec = endpoint
             validation._decorator = self
 
-            if hasattr(self, "_spec"):
-                del self._spec
-
+            self._spec = None
             return validation
 
         return decorate_validation
@@ -377,11 +378,6 @@ class SpecTree:
     ) -> str:
         """
         Register a model schema and return its OpenAPI component name.
-
-        :param model: model used for request/response validation.
-        :param mode: schema generation mode:
-            'validation' for input models,
-            'serialization' for output models.
         """
         schema = self.model_adapter.json_schema(
             model=model,
@@ -395,9 +391,83 @@ class SpecTree:
             schema=schema,
         )
 
+    def _parse_endpoint_params(
+        self,
+        endpoint: EndpointSpec,
+        params: list[Mapping[str, Any]],
+        models: Mapping[str, Any],
+    ) -> list[Mapping[str, Any]]:
+        attr_to_spec_key = {
+            "query": "query",
+            "headers": "header",
+            "cookies": "cookie",
+        }
+        route_param_keywords = ("explode", "style", "allowReserved")
+
+        for attr, position in attr_to_spec_key.items():
+            model_key = endpoint.model_key_for(attr)
+            if model_key is None:
+                continue
+
+            model = models[model_key]
+            properties = model.get(
+                "properties",
+                {model.get("title"): model},
+            )
+
+            for name, property_schema in properties.items():
+                schema = property_schema.copy()
+                extra = {
+                    kw: schema.pop(kw) for kw in route_param_keywords if kw in schema
+                }
+
+                params.append(
+                    {
+                        "name": name,
+                        "in": position,
+                        "schema": schema,
+                        "required": name in model.get("required", []),
+                        "description": schema.get("description", ""),
+                        **extra,
+                    }
+                )
+
+        return params
+
+    def _parse_endpoint_request(
+        self,
+        endpoint: EndpointSpec,
+    ) -> dict[str, Any]:
+        content_items: dict[str, Any] = {}
+
+        json_key = endpoint.model_key_for("json")
+        if json_key is not None:
+            content_items["application/json"] = {
+                "schema": {
+                    "$ref": f"#/components/schemas/{json_key}",
+                }
+            }
+
+        form_key = endpoint.model_key_for("form")
+        if form_key is not None:
+            content_items["multipart/form-data"] = {
+                "schema": {
+                    "$ref": f"#/components/schemas/{form_key}",
+                }
+            }
+
+        return (
+            {
+                "content": content_items,
+                "required": True,
+            }
+            if content_items
+            else {}
+        )
+
     def _generate_spec(self) -> dict[str, Any]:
         """
-        Generate the OpenAPI specification from the compiled endpoint contracts.
+        Generate the OpenAPI specification from compiled endpoint contracts.
         """
         models = json_compatible_deepcopy(dict(self.models))
 
@@ -410,12 +480,16 @@ class SpecTree:
                     continue
 
                 endpoint = self.get_endpoint_spec(func)
-                metadata = self.get_function_metadata(func) or FunctionDecorator()
+                metadata = (
+                    self.get_function_metadata(func) if endpoint is None else None
+                )
 
                 path_parameter_descriptions = (
                     endpoint.path_parameter_descriptions
                     if endpoint is not None
                     else metadata.path_parameter_descriptions
+                    if metadata is not None
+                    else None
                 )
 
                 path, parameters = self.backend.parse_path(
@@ -426,11 +500,10 @@ class SpecTree:
                 name = parse_name(func)
                 summary, desc = parse_comments(func)
 
-                func_tags = (
-                    endpoint.tags
-                    if endpoint is not None
-                    else metadata.tags
-                )
+                if endpoint is not None:
+                    func_tags = endpoint.tags
+                else:
+                    func_tags = metadata.tags if metadata is not None else ()
 
                 for tag in func_tags:
                     if str(tag) not in tags:
@@ -440,51 +513,71 @@ class SpecTree:
                             else {"name": tag}
                         )
 
-                operation_id = (
-                    endpoint.operation_id
-                    if endpoint is not None and endpoint.operation_id
-                    else self.backend.get_func_operation_id(
+                if endpoint is not None:
+                    operation_id = (
+                        endpoint.operation_id
+                        or f"{method.lower()}_{path.replace('/', '_')}"
+                    )
+                    endpoint_parameters = self._parse_endpoint_params(
+                        endpoint,
+                        parameters[:],
+                        models,
+                    )
+                    responses = (
+                        endpoint.response.generate_spec(self.naming_strategy)
+                        if endpoint.response is not None
+                        else {}
+                    )
+                    request_body = self._parse_endpoint_request(endpoint)
+                else:
+                    operation_id = self.backend.get_func_operation_id(
                         func,
                         path,
                         method,
                     )
-                )
+                    endpoint_parameters = (
+                        metadata.parse_params(
+                            parameters[:],
+                            models,
+                        )
+                        if metadata is not None
+                        else []
+                    )
+                    responses = (
+                        metadata.parse_resp(self.naming_strategy)
+                        if metadata is not None
+                        else {}
+                    )
+                    request_body = (
+                        metadata.parse_request() if metadata is not None else {}
+                    )
 
-                routes[path][method.lower()] = {
+                operation: dict[str, Any] = {
                     "summary": summary or f"{name} <{method}>",
                     "operationId": operation_id,
                     "description": desc or "",
                     "tags": [str(x) for x in func_tags],
-                    "parameters": metadata.parse_params(
-                        parameters[:],
-                        models,
-                    ),
-                    "responses": metadata.parse_resp(
-                        self.naming_strategy,
-                    ),
+                    "parameters": endpoint_parameters,
+                    "responses": responses,
                 }
 
-                security = (
-                    endpoint.security
-                    if endpoint is not None
-                    else metadata.security
-                )
+                if endpoint is not None:
+                    security = endpoint.security
+                    deprecated = endpoint.deprecated
+                else:
+                    security = metadata.security if metadata is not None else None
+                    deprecated = metadata.deprecated if metadata is not None else False
+
                 if security is not None:
-                    routes[path][method.lower()]["security"] = get_security(
-                        security,
-                    )
+                    operation["security"] = get_security(security)
 
-                deprecated = (
-                    endpoint.deprecated
-                    if endpoint is not None
-                    else metadata.deprecated
-                )
                 if deprecated:
-                    routes[path][method.lower()]["deprecated"] = deprecated
+                    operation["deprecated"] = deprecated
 
-                request_body = metadata.parse_request()
                 if request_body:
-                    routes[path][method.lower()]["requestBody"] = request_body
+                    operation["requestBody"] = request_body
+
+                routes[path][method.lower()] = operation
 
         spec: dict[str, Any] = {
             "openapi": self.config.openapi_version,
@@ -501,8 +594,7 @@ class SpecTree:
 
         if self.config.servers:
             spec["servers"] = [
-                server.to_dict(exclude_none=True)
-                for server in self.config.servers
+                server.to_dict(exclude_none=True) for server in self.config.servers
             ]
 
         if self.config.security_schemes:
@@ -514,60 +606,3 @@ class SpecTree:
         spec["security"] = get_security(self.config.security)
 
         return spec
-
-    def _get_model_definitions(
-        self,
-        models: Mapping[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Extract nested $defs into OpenAPI components without mutating the
-        supplied schema mapping.
-        """
-        definitions: dict[str, Any] = {}
-
-        for name, schema in models.items():
-            nested = schema.get("$defs")
-            if not isinstance(nested, dict):
-                continue
-
-            self._collect_model_definitions(
-                parent_name=name,
-                definitions=nested,
-                output=definitions,
-            )
-
-        return definitions
-
-    def _collect_model_definitions(
-        self,
-        *,
-        parent_name: str,
-        definitions: Mapping[str, Any],
-        output: dict[str, Any],
-    ) -> None:
-        for key, value in definitions.items():
-            component_name = self.nested_naming_strategy(
-                parent_name,
-                key,
-            )
-
-            if not isinstance(value, dict):
-                continue
-
-            nested_schema = json_compatible_deepcopy(value)
-            nested_defs = nested_schema.pop("$defs", None)
-
-            existing = output.get(component_name)
-            if existing is not None and existing != nested_schema:
-                raise ValueError(
-                    f"Nested schema collision for component {component_name!r}."
-                )
-
-            output[component_name] = nested_schema
-
-            if isinstance(nested_defs, dict):
-                self._collect_model_definitions(
-                    parent_name=component_name,
-                    definitions=nested_defs,
-                    output=output,
-                )

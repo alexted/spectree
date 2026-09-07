@@ -8,7 +8,7 @@ pytest.importorskip("msgspec")
 import msgspec
 
 import spectree.model_adapter as model_adapter_module
-from spectree import Response, model_adapter
+from spectree import Response
 from spectree.config import Configuration
 from spectree.model_adapter import get_msgspec_model_adapter
 from spectree.model_adapter.msgspec_adapter import MsgspecModelAdapter
@@ -386,18 +386,6 @@ def test_msgspec_annotated_nested_generic_model_instance():
         spec,
     )
 
-
-def test_compiled_annotated_model(model_case):
-    if model_case.name != "msgspec":
-        pytest.skip("msgspec-specific")
-
-    model = Annotated[list[int], msgspec.Meta(title="Numbers")]
-
-    compiled = model_case.adapter.compile(model)
-
-    instance = compiled.validate_obj([1, 2, 3])
-
-    assert instance == [1, 2, 3]
 
 def test_compiled_annotated_model(model_case):
     if model_case.name != "msgspec":

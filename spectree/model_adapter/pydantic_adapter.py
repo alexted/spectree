@@ -13,7 +13,7 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
-from spectree.model_adapter.protocol import ModelAdapter, SchemaMode, ModelSpec
+from spectree.model_adapter.protocol import ModelAdapter, ModelSpec, SchemaMode
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
 
@@ -189,13 +189,13 @@ class PydanticCompiledModel:
             )
 
     def is_instance(self, value: Any) -> bool:
-        if not self.model_spec is ValidationError:
-            return False
-
         if self._is_base_model or self._is_dataclass:
             return isinstance(value, self.model_spec)
 
-        return _is_instance_of_model(value, self.model_spec)
+        return _is_instance_of_model(
+            value,
+            self.model_spec,
+        )
 
     def validate_obj(self, value: Any) -> Any:
         if self._is_base_model:
@@ -215,10 +215,7 @@ class PydanticCompiledModel:
 
         return self._type_adapter.validate_json(value)
 
-    def dump_json(
-        self,
-        value: Any,
-    ) -> bytes:
+    def dump_json(self, value: Any) -> bytes:
         if isinstance(value, BaseModel):
             return value.model_dump_json().encode("utf-8")
 
@@ -249,11 +246,6 @@ class PydanticCompiledModel:
             mode=mode,
         )
 
-    def dump_json(self, value: Any) -> bytes:
-        if self._is_base_model:
-            return self.model_spec.model_dump_json(value).encode("utf-8")
-
-        return self._type_adapter.dump_json(value)
 
 class PydanticModelAdapter(
     ModelAdapter[Any, ValidationError, type[BaseFile]],
@@ -350,16 +342,16 @@ class PydanticModelAdapter(
         return False
 
     def validate_obj(
-            self,
-            model: ModelSpec,
-            value: Any,
+        self,
+        model: ModelSpec,
+        value: Any,
     ) -> Any:
         return self.compile(model).validate_obj(value)
 
     def validate_json(
-            self,
-            model: ModelSpec,
-            value: bytes,
+        self,
+        model: ModelSpec,
+        value: bytes,
     ) -> Any:
         return self.compile(model).validate_json(value)
 
@@ -398,11 +390,11 @@ class PydanticModelAdapter(
         )
 
     def json_schema(
-            self,
-            model: ModelSpec,
-            *,
-            ref_template: str,
-            mode: SchemaMode = "validation",
+        self,
+        model: ModelSpec,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
         return self.compile(model).json_schema(
             ref_template=ref_template,

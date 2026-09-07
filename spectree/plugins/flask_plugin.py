@@ -1,11 +1,10 @@
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import flask
 from flask import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
-from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import Context, validate_response
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
 from spectree.response import Response
@@ -105,11 +104,11 @@ class FlaskPlugin(WerkzeugPlugin):
         return response, resp_validation_error
 
     def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         # WebSocket handlers do not produce an HTTP response that Spectree can
         # validate or serialize. Leave their lifecycle entirely to Werkzeug and

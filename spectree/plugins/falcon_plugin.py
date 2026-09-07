@@ -3,7 +3,7 @@ import inspect
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 try:
     # some platforms may ban `tempfile`, e.g. Google App Engine
@@ -26,10 +26,9 @@ from falcon.asgi.reader import BufferedReader as ASGIBufferedReader
 from falcon.routing.compiled import _FIELD_PATTERN as FALCON_FIELD_PATTERN
 from falcon.util.reader import DEFAULT_CHUNK_SIZE, BufferedReader
 
-from spectree.model_adapter import ModelSpec
+from spectree.endpoint import EndpointSpec
 from spectree.plugins.base import BasePlugin, validate_response
 from spectree.response import Response
-from spectree.endpoint import EndpointSpec
 
 
 class StreamWrapper:
@@ -318,11 +317,11 @@ class FalconPlugin(BasePlugin):
         return resp_validation_error
 
     def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
@@ -341,9 +340,7 @@ class FalconPlugin(BasePlugin):
                 )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
-                _resp.status = (
-                    f"{endpoint.validation_error_status} Validation Error"
-                )
+                _resp.status = f"{endpoint.validation_error_status} Validation Error"
                 _resp.media = self.model_adapter.validation_errors(err)
 
         endpoint.before(
@@ -368,7 +365,7 @@ class FalconPlugin(BasePlugin):
 
         resp_validation_error = self.validate_response(
             _resp,
-            endpoint.resp,
+            endpoint.response,
             endpoint.skip_validation,
             endpoint.force_resp_serialize,
         )
@@ -433,11 +430,11 @@ class FalconAsgiPlugin(FalconPlugin):
             req.context.form = self.model_adapter.validate_obj(form, req_form)
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
@@ -456,9 +453,7 @@ class FalconAsgiPlugin(FalconPlugin):
                 )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
-                _resp.status = (
-                    f"{endpoint.validation_error_status} Validation Error"
-                )
+                _resp.status = f"{endpoint.validation_error_status} Validation Error"
                 _resp.media = self.model_adapter.validation_errors(err)
 
         endpoint.before(
@@ -487,7 +482,7 @@ class FalconAsgiPlugin(FalconPlugin):
 
         resp_validation_error = self.validate_response(
             _resp,
-            endpoint.resp,
+            endpoint.response,
             endpoint.skip_validation,
             endpoint.force_resp_serialize,
         )
