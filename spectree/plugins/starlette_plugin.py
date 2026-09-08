@@ -19,14 +19,19 @@ from spectree.utils import get_multidict_items_starlette
 
 METHODS = {"get", "post", "put", "patch", "delete"}
 Route = namedtuple("Route", ["path", "methods", "func"])
-_active_model_adapter: ContextVar[ModelAdapterType | None] = ContextVar("spectree_starlette_model_adapter", default=None)
+_active_model_adapter: ContextVar[ModelAdapterType | None] = ContextVar(
+    "spectree_starlette_model_adapter", default=None
+)
 _response_models: dict[object, ModelSpec] = {}
 
 
 def _get_response_model(model_adapter: ModelAdapterType) -> ModelSpec:
     response_model = _response_models.get(model_adapter)
     if response_model is None:
-        response_model = model_adapter.make_root_model(Any, name="_SpecTreeStarletteResponseModel")
+        response_model = model_adapter.make_root_model(
+            Any,
+            name="_SpecTreeStarletteResponseModel",
+        )
         _response_models[model_adapter] = response_model
     return response_model
 
@@ -34,7 +39,9 @@ def _get_response_model(model_adapter: ModelAdapterType) -> ModelSpec:
 def _get_starlette_response_model_adapter() -> ModelAdapterType:
     model_adapter = _active_model_adapter.get()
     if model_adapter is None:
-        raise RuntimeError("SpecTreeStarletteResponse must be rendered inside a SpecTree request")
+        raise RuntimeError(
+            "SpecTreeStarletteResponse must be rendered inside a SpecTree request"
+        )
     return model_adapter
 
 
@@ -54,17 +61,35 @@ class StarlettePlugin(BasePlugin):
         self.conv2type = {conv: typ for typ, conv in CONVERTOR_TYPES.items()}
 
     def register_route(self, app):
-        app.add_route(self.config.spec_url, lambda request: JSONResponse(self.spectree.spec))
+        app.add_route(
+            self.config.spec_url,
+            lambda request: JSONResponse(self.spectree.spec),
+        )
         for ui in self.config.page_templates:
-            app.add_route(f"/{self.config.path}/{ui}", lambda request, ui=ui: HTMLResponse(
-                self.config.page_templates[ui].format(spec_url=self.config.filename, spec_path=self.config.path, **self.config.swagger_oauth2_config())
-            ))
+            app.add_route(
+                f"/{self.config.path}/{ui}",
+                lambda request, ui=ui: HTMLResponse(
+                    self.config.page_templates[ui].format(
+                        spec_url=self.config.filename,
+                        spec_path=self.config.path,
+                        **self.config.swagger_oauth2_config(),
+                    )
+                ),
+            )
 
-    async def get_request_data(self, request: Request, endpoint: EndpointSpec) -> RequestData:
+    async def get_request_data(
+        self, request: Request, endpoint: EndpointSpec
+    ) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
-        content_type = request.headers.get("content-type", "").lower()
-        use_json = endpoint.json and has_data and content_type == "application/json"
-        use_form = endpoint.form and has_data and any(x in content_type for x in self.FORM_MIMETYPE)
+        content_type = request.headers.get("content-type", "")
+        media_type = content_type.split(";", 1)[0].strip().lower()
+
+        use_json = endpoint.json and has_data and media_type == "application/json"
+        use_form = (
+            endpoint.form
+            and has_data
+            and media_type in self.FORM_MIMETYPE
+        )
 
         req_json = None
         if use_json:
@@ -72,16 +97,27 @@ class StarlettePlugin(BasePlugin):
             if req_json is None:
                 req_json = {}
 
-        req_form = await request.form() or {} if use_form else None
+        req_form = None
+        if use_form:
+            req_form = get_multidict_items_starlette(
+                await request.form(),
+                endpoint.form,
+            )
+
         return RequestData(
-            query=get_multidict_items_starlette(request.query_params, endpoint.query),
+            query=get_multidict_items_starlette(
+                request.query_params,
+                endpoint.query,
+            ),
             json=req_json,
             form=req_form,
-            headers=request.headers,
-            cookies=request.cookies,
+            headers=dict(request.headers),
+            cookies=dict(request.cookies),
         )
 
-    async def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
+    async def validate(
+        self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any
+    ):
         async def call_with_model_adapter() -> Any:
             token = _active_model_adapter.set(self.model_adapter)
             try:
@@ -109,13 +145,29 @@ class StarlettePlugin(BasePlugin):
             self.set_request_data(request, request_data)
         except self.model_adapter.validation_error as err:
             req_validation_error = err
-            response = JSONResponse(self.model_adapter.validation_errors(err), endpoint.validation_error_status)
+            response = JSONResponse(
+                self.model_adapter.validation_errors(err),
+                endpoint.validation_error_status,
+            )
         except JSONDecodeError as err:
             json_decode_error = err
-            self.logger.info("%s Validation Error", endpoint.validation_error_status, extra={"spectree_json_decode_error": str(err)})
-            response = JSONResponse({"error_msg": str(err)}, endpoint.validation_error_status)
+            self.logger.info(
+                "%s Validation Error",
+                endpoint.validation_error_status,
+                extra={"spectree_json_decode_error": str(err)},
+            )
+            response = JSONResponse(
+                {"error_msg": str(err)},
+                endpoint.validation_error_status,
+            )
 
-        endpoint.before(request, response, req_validation_error, instance, self.model_adapter)
+        endpoint.before(
+            request,
+            response,
+            req_validation_error,
+            instance,
+            self.model_adapter,
+        )
         if req_validation_error or json_decode_error:
             return response
 
@@ -125,7 +177,8 @@ class StarlettePlugin(BasePlugin):
         if not endpoint.skip_validation and endpoint.response and response and not (
             isinstance(response, JSONResponse)
             and hasattr(response, "_model_class")
-            and response._model_class == endpoint.response.find_model(response.status_code)
+            and response._model_class
+            == endpoint.response.find_model(response.status_code)
         ):
             try:
                 result = validate_response(
@@ -135,17 +188,27 @@ class StarlettePlugin(BasePlugin):
                     endpoint.force_resp_serialize,
                 )
             except self.model_adapter.validation_error as err:
-                response = JSONResponse(self.model_adapter.validation_errors(err), 500)
+                response = JSONResponse(
+                    self.model_adapter.validation_errors(err),
+                    500,
+                )
                 resp_validation_error = err
             else:
                 if isinstance(result.payload, bytes):
                     response.body = result.payload
 
-        endpoint.after(request, response, resp_validation_error, instance, self.model_adapter)
+        endpoint.after(
+            request,
+            response,
+            resp_validation_error,
+            instance,
+            self.model_adapter,
+        )
         return response
 
     def find_routes(self):
         routes = []
+
         def parse_route(app, prefix=""):
             if not app.routes:
                 return
@@ -157,15 +220,26 @@ class StarlettePlugin(BasePlugin):
                     try:
                         func = func.__wrapped__
                     except AttributeError as err:
-                        self.logger.warning("failed to get the wrapped func %s: %s", func, err)
+                        self.logger.warning(
+                            "failed to get the wrapped func %s: %s",
+                            func,
+                            err,
+                        )
                 if inspect.isclass(func):
                     for method in METHODS:
                         if getattr(func, method, None):
-                            routes.append(Route(f"{prefix}{route.path}", {method.upper()}, getattr(func, method)))
+                            routes.append(
+                                Route(
+                                    f"{prefix}{route.path}",
+                                    {method.upper()},
+                                    getattr(func, method),
+                                )
+                            )
                 elif inspect.isfunction(func):
                     routes.append(Route(f"{prefix}{route.path}", route.methods, route.endpoint))
                 else:
                     parse_route(route, prefix=f"{prefix}{route.path}")
+
         parse_route(self.spectree.app)
         return routes
 
@@ -191,6 +265,18 @@ class StarlettePlugin(BasePlugin):
                 schema = {"type": "string"}
             else:
                 schema = None
-            description = path_parameter_descriptions.get(name, "") if path_parameter_descriptions else ""
-            parameters.append({"name": name, "in": "path", "required": True, "schema": schema, "description": description})
+            description = (
+                path_parameter_descriptions.get(name, "")
+                if path_parameter_descriptions
+                else ""
+            )
+            parameters.append(
+                {
+                    "name": name,
+                    "in": "path",
+                    "required": True,
+                    "schema": schema,
+                    "description": description,
+                }
+            )
         return path, parameters
