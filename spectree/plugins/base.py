@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, NamedTuple, Optional, TypeVar
 
@@ -42,7 +42,9 @@ class BasePlugin(Generic[BackendRoute]):
     def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
         raise NotImplementedError
 
-    def get_request_data(self, request: Any, endpoint: EndpointSpec) -> RequestData:
+    def get_request_data(
+        self, request: Any, endpoint: EndpointSpec
+    ) -> RequestData | Awaitable[RequestData]:
         raise NotImplementedError
 
     def validate_request_data(
@@ -142,10 +144,16 @@ def validate_response(
 
     if not skip_validation:
         if isinstance(final_response_payload, bytes):
-            validated_instance = model_adapter.validate_json(validation_model, final_response_payload)
+            validated_instance = model_adapter.validate_json(
+                validation_model, final_response_payload
+            )
         else:
-            validated_instance = model_adapter.validate_obj(validation_model, final_response_payload)
-        if force_serialize or model_adapter.is_partial_model_instance(final_response_payload):
+            validated_instance = model_adapter.validate_obj(
+                validation_model, final_response_payload
+            )
+        if force_serialize or model_adapter.is_partial_model_instance(
+            final_response_payload
+        ):
             final_response_payload = model_adapter.dump_json(validated_instance)
 
     return ResponseValidationResult(payload=final_response_payload)
