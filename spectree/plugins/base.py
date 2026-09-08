@@ -56,7 +56,7 @@ class BasePlugin(Generic[BackendRoute]):
             model = endpoint.model_for(name)
             values[name] = (
                 self.model_adapter.validate_obj(model, value)
-                if model is not None
+                if model is not None and value is not None
                 else value
             )
         return RequestData(**values)
@@ -96,7 +96,9 @@ class BasePlugin(Generic[BackendRoute]):
     def bypass(self, func: Callable, method: str) -> bool:
         raise NotImplementedError
 
-    def parse_path(self, route: Any, path_parameter_descriptions: Mapping[str, str] | None):
+    def parse_path(
+        self, route: Any, path_parameter_descriptions: Mapping[str, str] | None
+    ):
         raise NotImplementedError
 
     def parse_func(self, route: BackendRoute):
@@ -140,13 +142,9 @@ def validate_response(
 
     if not skip_validation:
         if isinstance(final_response_payload, bytes):
-            validated_instance = model_adapter.validate_json(
-                validation_model, final_response_payload
-            )
+            validated_instance = model_adapter.validate_json(validation_model, final_response_payload)
         else:
-            validated_instance = model_adapter.validate_obj(
-                validation_model, final_response_payload
-            )
+            validated_instance = model_adapter.validate_obj(validation_model, final_response_payload)
         if force_serialize or model_adapter.is_partial_model_instance(final_response_payload):
             final_response_payload = model_adapter.dump_json(validated_instance)
 
