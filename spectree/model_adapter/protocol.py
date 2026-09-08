@@ -1,7 +1,6 @@
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
-# ModelSpec is not "any value accepted by Spectree".
-# It is a type expression whose support is determined by the selected adapter.
+ModelClass: TypeAlias = type[Any]
 ModelSpec: TypeAlias = Any
 
 ModelT = TypeVar("ModelT")
@@ -29,6 +28,7 @@ class CompiledModel(Protocol[ModelT]):
         ...
 
     def dump_json(self, value: Any) -> bytes:
+        """Serialize a value to JSON."""
         ...
 
     def json_schema(
@@ -42,38 +42,45 @@ class CompiledModel(Protocol[ModelT]):
 
 
 class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
-    """The protocol of model adapter.
-
-    A model spec is an adapter-defined runtime type expression. It may be a
-    model class, a generic alias such as ``list[User]``, ``Annotated[...]``,
-    or another type expression supported by the adapter.
-    """
+    """The protocol of model adapter."""
 
     validation_error: type[ValidationErrorT]
     basefile: BaseFileT
 
     def is_model_type(self, value: ModelSpec) -> bool:
-        """Check if the value can be used to generate a schema."""
+        """Return whether value is a supported model/type expression."""
         ...
 
-    def is_model_instance(self, value: Any, model: ModelSpec) -> bool:
-        """Check if ``value`` is an instance of ``model`` under this adapter.
-
-        If it is already a valid model instance, runtime validation may be
-        skipped.
-        """
+    def is_model_instance(
+        self,
+        value: Any,
+        model: ModelSpec,
+    ) -> bool:
+        """Check if value is an instance of model under this adapter."""
         ...
 
     def is_partial_model_instance(self, value: Any) -> bool:
+        """Return whether value contains a model instance."""
         ...
 
-    def validate_obj(self, model: ModelSpec, value: Any) -> ModelT:
+    def validate_obj(
+        self,
+        model: ModelSpec,
+        value: Any,
+    ) -> ModelT:
+        """Validate a Python object against a model specification."""
         ...
 
-    def validate_json(self, model: ModelSpec, value: bytes) -> ModelT:
+    def validate_json(
+        self,
+        model: ModelSpec,
+        value: bytes,
+    ) -> ModelT:
+        """Validate JSON bytes against a model specification."""
         ...
 
     def dump_json(self, value: Any) -> bytes:
+        """Serialize a value to JSON."""
         ...
 
     def make_root_model(
@@ -83,9 +90,14 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         name: str | None = None,
         module: str | None = None,
     ) -> ModelSpec:
+        """Create an adapter-specific root model."""
         ...
 
-    def make_list_model(self, model: ModelSpec) -> ModelSpec:
+    def make_list_model(
+        self,
+        model: ModelSpec,
+    ) -> ModelSpec:
+        """Create an adapter-specific list model."""
         ...
 
     def json_schema(
@@ -95,11 +107,19 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
+        """Generate the JSON schema for a model specification."""
         ...
 
-    def validation_errors(self, err: ValidationErrorT) -> Any:
+    def validation_errors(
+        self,
+        err: ValidationErrorT,
+    ) -> Any:
+        """Convert an adapter validation error to Spectree's error format."""
         ...
 
-    def compile(self, model: ModelSpec) -> CompiledModel[ModelT]:
+    def compile(
+        self,
+        model: ModelSpec,
+    ) -> CompiledModel[ModelT]:
         """Compile a model specification into an adapter-specific runtime model."""
         ...

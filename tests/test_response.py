@@ -1,9 +1,11 @@
 import pytest
+from typing import Annotated
 
-from spectree import get_msgspec_model_adapter
+
+from spectree import get_msgspec_model_adapter, get_pydantic_model_adapter
 from spectree.response import DEFAULT_CODE_DESC, Response
 from spectree.utils import get_model_key
-from tests.common_dataclass import SimpleModel, DemoModel
+from tests.common_dataclass import DemoModel, SimpleModel
 from tests.model_cases import PYDANTIC_MODEL_CASE_PARAMS
 
 
@@ -212,8 +214,81 @@ def test_list_model(model_case):
 def test_response_accepts_list_model():
     response = Response(HTTP_200=list[DemoModel])
 
-    compiled = response.copy_for_model_adapter(
-        get_msgspec_model_adapter()
+    compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_generic_model_spec():
+    response = Response(
+        HTTP_200=list[DemoModel],
     )
+
+    compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_annotated_model_spec():
+
+    response = Response(
+        HTTP_200=Annotated[
+            DemoModel,
+            "metadata",
+        ],
+    )
+
+    compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_nested_generic_model_spec():
+    response = Response(
+        HTTP_200=list[dict[str, DemoModel]],
+    )
+
+    compiled = response.copy_for_model_adapter(
+        get_msgspec_model_adapter(),
+    )
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_nested_generic_model_spec_with_pydantic():
+
+    response = Response(
+        HTTP_200=list[dict[str, DemoModel]],
+    )
+
+    compiled = response.copy_for_model_adapter(
+        get_pydantic_model_adapter(),
+    )
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_annotated_list_model():
+    response = Response(
+        HTTP_200=Annotated[
+            list[DemoModel],
+            "metadata",
+        ],
+    )
+
+    compiled = response.copy_for_model_adapter(get_msgspec_model_adapter())
+
+    assert compiled.find_model(200) is not None
+
+
+def test_response_accepts_annotated_nested_generic_model():
+    response = Response(
+        HTTP_200=Annotated[
+            list[dict[str, DemoModel]],
+            "metadata",
+        ],
+    )
+
+    compiled = response.copy_for_model_adapter(get_pydantic_model_adapter())
 
     assert compiled.find_model(200) is not None

@@ -2,7 +2,7 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, Optional, TypeAlias, get_args, get_origin
 
 from spectree._types import ModelAdapterType, NamingStrategy
 from spectree.model_adapter import ModelSpec
@@ -42,9 +42,9 @@ class Response:
     :py:meth:`SpecTree.validate<spectree.spec.SpecTree.validate>` method.
 
     :param codes: list of HTTP status code, format('HTTP_[0-9]{3}'), 'HTTP_200'
-    :param code_models: dict of <HTTP status code>: <model class> or None or
-        a two element tuple of (<model class> or None) as the first item and
-        a custom status code description string as the second item.
+    :param code_models: mapping of HTTP status code to a supported model
+        specification, None, or a two-element tuple containing a model
+        specification and a custom status-code description.
 
     examples:
 
@@ -62,48 +62,11 @@ class Response:
         *codes: str,
         **code_models: ResponseModelConfig,
     ) -> None:
-        self.model_adapter: ModelAdapterType | None = None
-        self.codes: list[str] = []
-        self._raw_code_models: dict[str, Any] = {}
-
-        for code in codes:
-            assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
-            self.codes.append(code)
-
-        self.code_models: dict[str, ModelSpec] = {}
-        self.code_descriptions: dict[str, str | None] = {}
         self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        self._model_keys: dict[str, str] = {}
-        for code, model_and_description in code_models.items():
-            assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
-            description: str | None = None
-            if isinstance(model_and_description, tuple):
-                assert len(model_and_description) == 2, (
-                    "unexpected number of arguments for a tuple of "
-                    "response model and HTTP status code description"
-                )
-                model = model_and_description[0]
-                description = model_and_description[1]
-            else:
-                model = model_and_description
-
-            if model:
-                self._raw_code_models[code] = model
-                assert description is None or isinstance(description, str), (
-                    "invalid HTTP status code description"
-                )
-            else:
-                self.codes.append(code)
-
-            if description:
-                self.code_descriptions[code] = description
 
     def copy_for_model_adapter(
-            self,
-            model_adapter: ModelAdapterType,
+        self,
+        model_adapter: ModelAdapterType,
     ) -> "Response":
         """
         Create an adapter-bound copy without mutating this declaration.
@@ -114,11 +77,12 @@ class Response:
 
         response.codes = list(self.codes)
         response._raw_code_models = dict(self._raw_code_models)
+        response.code_models = {}
         response.code_descriptions = dict(self.code_descriptions)
-
-        response.model_adapter = model_adapter
-        response.code_models = response._build_models(model_adapter)
         response._model_keys = {}
+        response.model_adapter = model_adapter
+
+        response.code_models = response._build_models(model_adapter)
 
         return response
 
@@ -131,13 +95,23 @@ class Response:
         self.code_models = self._build_models(model_adapter)
 
     def _build_model(
-        self, raw_model: Any, model_adapter: ModelAdapterType
+        self,
+        raw_model: ModelSpec,
+        model_adapter: ModelAdapterType,
     ) -> ModelSpec:
-        model = raw_model
-        origin_type = getattr(model, "__origin__", None)
+        origin_type = get_origin(raw_model)
         if origin_type is list:
-            model = model_adapter.make_list_model(model.__args__[0])  # type: ignore
+            args = get_args(raw_model)
+
+            if len(args) != 1:
+                raise AssertionError(f"invalid response model: {raw_model}")
+
+            model = model_adapter.make_list_model(args[0])
+        else:
+            model = raw_model
+
         assert model_adapter.is_model_type(model), f"invalid response model: {model}"
+
         return model
 
     def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelSpec]:
@@ -172,7 +146,9 @@ class Response:
         self._raw_code_models[code_name] = model
         if self.model_adapter is not None:
             self.code_models[code_name] = self._build_model(model, self.model_adapter)
-        if description:
+        if description is None:
+            self.code_descriptions.pop(code_name, None)
+        else:
             self.code_descriptions[code_name] = description
 
     def has_model(self) -> bool:

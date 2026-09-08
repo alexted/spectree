@@ -2,7 +2,12 @@ from functools import cache
 from importlib import import_module
 
 from spectree._types import ModelAdapterType
-from spectree.model_adapter.protocol import CompiledModel, ModelAdapter, ModelSpec
+from spectree.model_adapter.protocol import (
+    CompiledModel,
+    ModelAdapter,
+    ModelClass,
+    ModelSpec,
+)
 
 
 @cache
@@ -20,6 +25,7 @@ def get_msgspec_model_adapter() -> ModelAdapterType:
 __all__ = [
     "CompiledModel",
     "ModelAdapter",
+    "ModelClass",
     "ModelSpec",
     "get_msgspec_model_adapter",
     "get_pydantic_model_adapter",

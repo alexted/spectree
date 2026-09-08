@@ -3,9 +3,7 @@ import inspect
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
-from typing import Any, Optional
-
-from spectree.request_data import RequestData
+from typing import Any
 
 try:
     # some platforms may ban `tempfile`, e.g. Google App Engine
@@ -28,10 +26,9 @@ from falcon.asgi.reader import BufferedReader as ASGIBufferedReader
 from falcon.routing.compiled import _FIELD_PATTERN as FALCON_FIELD_PATTERN
 from falcon.util.reader import DEFAULT_CHUNK_SIZE, BufferedReader
 
-from spectree.model_adapter import ModelSpec
+from spectree.endpoint import EndpointSpec
 from spectree.plugins.base import BasePlugin, validate_response
 from spectree.response import Response
-from spectree.endpoint import EndpointSpec
 
 
 class StreamWrapper:
@@ -253,41 +250,35 @@ class FalconPlugin(BasePlugin):
 
         return f"/{'/'.join(subs)}", parameters
 
-    def get_request_data(
-            self,
-            req: FalconRequest,
-            endpoint: EndpointSpec,
-    ) -> RequestData:
-        req_json = None
-
-        if endpoint.json:
-            # Avoid falcon.MediaNotFoundError for an empty optional body.
-            req_json = req.get_media(default_when_empty={})
-
-        req_form = None
-
-        if endpoint.form and req.content_type:
+    def validate_request(self, req: FalconRequest, query, json, form, headers, cookies):
+        if query:
+            req.context.query = self.model_adapter.validate_obj(query, req.params)
+        if headers:
+            req.context.headers = self.model_adapter.validate_obj(headers, req.headers)
+        if cookies:
+            req.context.cookies = self.model_adapter.validate_obj(cookies, req.cookies)
+        if json:
+            # https://falcon.readthedocs.io/en/stable/api/media.html#exception-handling
+            # but `json` could be something optional, so we need to provide a default
+            # value here to avoid `falcon.MediaNotFoundError`
+            req.context.json = self.model_adapter.validate_obj(
+                json, req.get_media(default_when_empty={})
+            )
+        if form and req.content_type:
             req_form = {}
-
             if req.content_type == "application/x-www-form-urlencoded":
                 req_form = req.get_media()
-
             elif req.content_type.startswith("multipart/form-data"):
                 for part in req.get_media():
                     if part.filename is None:
                         req_form[part.name] = part.get_data()
                     else:
+                        # pass the `falcon.BodyPart` if it's attached as a file
                         req_form[part.name] = part
-                        # Preserve the existing stream-consumption workaround.
+                        # try to consume the file data, otherwise it will be lost
+                        # this is hacky since it changed the underlying stream type
                         part.stream = StreamWrapper(part.stream)
-
-        return RequestData(
-            query=dict(req.params),
-            json=req_json,
-            form=req_form,
-            headers=dict(req.headers),
-            cookies=dict(req.cookies),
-        )
+            req.context.form = self.model_adapter.validate_obj(form, req_form)
 
     def validate_response(
         self,
@@ -326,11 +317,11 @@ class FalconPlugin(BasePlugin):
         return resp_validation_error
 
     def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
@@ -339,16 +330,17 @@ class FalconPlugin(BasePlugin):
 
         if not endpoint.skip_validation:
             try:
-                request_data = self.validate_request_data(
-                    self.get_request_data(_req, endpoint),
-                    endpoint,
+                self.validate_request(
+                    _req,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
                 )
-                self.set_request_data(_req, request_data)
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
-                _resp.status = (
-                    f"{endpoint.validation_error_status} Validation Error"
-                )
+                _resp.status = f"{endpoint.validation_error_status} Validation Error"
                 _resp.media = self.model_adapter.validation_errors(err)
 
         endpoint.before(
@@ -362,7 +354,12 @@ class FalconPlugin(BasePlugin):
         if req_validation_error:
             return None
 
-        self.inject_request_data(request_data, endpoint, kwargs)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                _req.context,
+                name,
+                None,
+            )
 
         result = func(*args, **kwargs)
 
@@ -402,67 +399,62 @@ class FalconAsgiPlugin(FalconPlugin):
     OPEN_API_ROUTE_CLASS = OpenAPIAsgi
     DOC_PAGE_ROUTE_CLASS = DocPageAsgi
 
-    async def get_request_data(
-            self,
-            req: FalconASGIRequest,
-            endpoint: EndpointSpec,
-    ) -> RequestData:
-        req_json = None
-
-        if endpoint.json:
-            req_json = await req.get_media(
-                default_when_empty={}
-            )
-
-        req_form = None
-
-        if endpoint.form and req.content_type:
+    async def validate_async_request(
+        self, req: FalconASGIRequest, query, json, form, headers, cookies
+    ):
+        if query:
+            req.context.query = self.model_adapter.validate_obj(query, req.params)
+        if headers:
+            req.context.headers = self.model_adapter.validate_obj(headers, req.headers)
+        if cookies:
+            req.context.cookies = self.model_adapter.validate_obj(cookies, req.cookies)
+        if json:
+            # https://falcon.readthedocs.io/en/stable/api/media.html#exception-handling
+            # but `json` could be something optional, so we need to provide a default
+            # value here to avoid `falcon.MediaNotFoundError`
+            media = await req.get_media(default_when_empty={})
+            req.context.json = self.model_adapter.validate_obj(json, media)
+        if form and req.content_type:
             req_form = {}
-
             if req.content_type == "application/x-www-form-urlencoded":
                 req_form = await req.get_media()
-
             elif req.content_type.startswith("multipart/form-data"):
                 async for part in await req.get_media():
                     if part.filename is None:
                         req_form[part.name] = await part.get_data()
                     else:
+                        # pass the `falcon.BodyPart` if it's attached as a file
                         req_form[part.name] = part
-                        part.stream = (
-                            await AsyncStreamWrapper.from_stream(part.stream)
-                        )
-
-        return RequestData(
-            query=dict(req.params),
-            json=req_json,
-            form=req_form,
-            headers=dict(req.headers),
-            cookies=dict(req.cookies),
-        )
+                        # try to consume the file data, otherwise it will be lost
+                        part.stream = await AsyncStreamWrapper.from_stream(part.stream)
+            req.context.form = self.model_adapter.validate_obj(form, req_form)
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         # falcon endpoint method arguments: (self, req, resp)
         _self, _req, _resp = args[:3]
 
         req_validation_error = None
 
-        request_data = RequestData()
-
         if not endpoint.skip_validation:
             try:
-                request_data = self.validate_request_data(
-                    await self.get_request_data(_req, endpoint),
-                    endpoint,
+                await self.validate_async_request(
+                    _req,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
                 )
-                self.set_request_data(_req, request_data)
             except self.model_adapter.validation_error as err:
-                ...
+                req_validation_error = err
+                _resp.status = f"{endpoint.validation_error_status} Validation Error"
+                _resp.media = self.model_adapter.validation_errors(err)
 
         endpoint.before(
             _req,
@@ -475,7 +467,12 @@ class FalconAsgiPlugin(FalconPlugin):
         if req_validation_error:
             return None
 
-        self.inject_request_data(request_data, endpoint, kwargs)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                _req.context,
+                name,
+                None,
+            )
 
         result = (
             await func(*args, **kwargs)

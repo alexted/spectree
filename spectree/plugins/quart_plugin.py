@@ -6,10 +6,8 @@ import quart
 from quart import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
-from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import Context, validate_response
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
-from spectree.request_data import RequestData
 from spectree.response import Response
 from spectree.utils import get_multidict_items
 
@@ -28,50 +26,36 @@ class QuartPlugin(WerkzeugPlugin):
     def is_blueprint(app: Any) -> bool:
         return isinstance(app, Blueprint)
 
-    async def get_request_data(
-            self,
-            request,
-            endpoint: EndpointSpec,
-    ) -> RequestData:
-        """Extract and normalize a Quart request without model validation."""
-
-        req_query = get_multidict_items(request.args, endpoint.query)
+    async def request_validation(self, request, query, json, form, headers, cookies):
+        """
+        req_query: werkzeug.datastructures.ImmutableMultiDict
+        req_json: dict
+        req_headers: werkzeug.datastructures.EnvironHeaders
+        req_cookies: werkzeug.datastructures.ImmutableMultiDict
+        """
+        req_query = get_multidict_items(request.args)
         req_headers = dict(iter(request.headers)) or {}
         req_cookies = get_multidict_items(request.cookies) or {}
-
         has_data = request.method not in ("GET", "DELETE")
-
-        use_json = (
-                endpoint.json
-                and has_data
-                and request.mimetype == "application/json"
-        )
-
+        use_json = json and has_data and request.mimetype == "application/json"
         use_form = (
-                endpoint.form
-                and has_data
-                and any(x in request.mimetype for x in self.FORM_MIMETYPE)
+            form
+            and has_data
+            and any([x in request.mimetype for x in self.FORM_MIMETYPE])
         )
 
-        req_form = None
-
-        if use_form:
-            form = await request.form
-            files = await request.files
-
-            req_form = get_multidict_items(form, endpoint.form)
-
-            if files:
-                req_form.update(
-                    get_multidict_items(files, endpoint.form)
-                )
-
-        return RequestData(
-            query=req_query,
-            json=await request.get_json(silent=True) or {} if use_json else None,
-            form=req_form,
-            headers=req_headers,
-            cookies=req_cookies,
+        request.context = Context(
+            self.model_adapter.validate_obj(query, req_query) if query else None,
+            self.model_adapter.validate_obj(
+                json, await request.get_json(silent=True) or {}
+            )
+            if use_json
+            else None,
+            self.model_adapter.validate_obj(form, self.fill_form(request))
+            if use_form
+            else None,
+            self.model_adapter.validate_obj(headers, req_headers) if headers else None,
+            self.model_adapter.validate_obj(cookies, req_cookies) if cookies else None,
         )
 
     async def validate_response(
@@ -129,11 +113,11 @@ class QuartPlugin(WerkzeugPlugin):
         return response, resp_validation_error
 
     async def validate(
-            self,
-            func: Callable,
-            endpoint: EndpointSpec,
-            *args: Any,
-            **kwargs: Any,
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
     ):
         response, req_validation_error, resp_validation_error = (
             None,
@@ -141,17 +125,23 @@ class QuartPlugin(WerkzeugPlugin):
             None,
         )
 
-        request_data = RequestData()
-
         if not endpoint.skip_validation:
             try:
-                request_data = self.validate_request_data(
-                    await self.get_request_data(request, endpoint),
-                    endpoint,
+                await self.request_validation(
+                    request,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
                 )
-                self.set_request_data(request, request_data)
             except self.model_adapter.validation_error as err:
-                ...
+                req_validation_error = err
+                errors = self.model_adapter.validation_errors(err)
+                response = await make_response(
+                    jsonify(errors),
+                    endpoint.validation_error_status,
+                )
 
         endpoint.before(
             request,
@@ -165,7 +155,12 @@ class QuartPlugin(WerkzeugPlugin):
             assert response
             abort(response)
 
-        self.inject_request_data(request_data, endpoint, kwargs)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                getattr(request, "context", None),
+                name,
+                None,
+            )
 
         result = (
             await func(*args, **kwargs)

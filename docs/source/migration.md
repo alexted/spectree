@@ -71,12 +71,10 @@ Pass the same adapter to `SpecTree` when selecting it explicitly.
 The `before` and `after` hook signatures have a new final argument:
 
 ```python
-def before(request, response, validation_error, instance, model_adapter):
-    ...
+def before(request, response, validation_error, instance, model_adapter): ...
 
 
-def after(request, response, validation_error, instance, model_adapter):
-    ...
+def after(request, response, validation_error, instance, model_adapter): ...
 ```
 
 Update custom hooks that accepted exactly four arguments. The new argument
@@ -208,9 +206,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class Example(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"examples": [{"name": "example"}]}
-    )
+    model_config = ConfigDict(json_schema_extra={"examples": [{"name": "example"}]})
 
     name: str
 ```

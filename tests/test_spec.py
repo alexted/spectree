@@ -17,7 +17,6 @@ from spectree.plugins.flask_plugin import FlaskPlugin
 from spectree.spec import SpecTree
 from spectree.utils import (
     get_model_key,
-    json_compatible_deepcopy,
 )
 from tests.common import get_paths
 from tests.common_dataclass import (
@@ -515,9 +514,7 @@ def test_validation_and_serialization_models_have_distinct_schema_components(
     api = SpecTree(
         "flask",
         naming_strategy=lambda model: (
-            "ModeAwareModel"
-            if model is target_model
-            else "ValidationError"
+            "ModeAwareModel" if model is target_model else "ValidationError"
         ),
         model_adapter=model_case.adapter,
     )
@@ -568,38 +565,30 @@ def test_validation_and_serialization_models_have_distinct_schema_components(
     with app.app_context():
         spec = api.spec
 
-    assert (
-        spec["paths"]["/users"]["post"]["requestBody"]["content"][
-            "application/json"
-        ]["schema"]
-        == {"$ref": "#/components/schemas/ModeAwareModel"}
-    )
+    assert spec["paths"]["/users"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ModeAwareModel"}
 
-    assert (
-        spec["paths"]["/users"]["post"]["responses"]["200"]["content"][
-            "application/json"
-        ]["schema"]
-        == {"$ref": "#/components/schemas/ModeAwareModel.serialization"}
-    )
+    assert spec["paths"]["/users"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/ModeAwareModel.serialization"}
 
     assert "ModeAwareModel" in spec["components"]["schemas"]
     assert "ModeAwareModel.serialization" in spec["components"]["schemas"]
 
-    assert (
-        spec["components"]["schemas"]["ModeAwareModel"]["properties"]
-        == {"name": {"type": "string"}}
-    )
+    assert spec["components"]["schemas"]["ModeAwareModel"]["properties"] == {
+        "name": {"type": "string"}
+    }
 
-    assert (
-        spec["components"]["schemas"]["ModeAwareModel.serialization"]["properties"]
-        == {
-            "name": {"type": "string"},
-            "display_name": {"type": "string"},
-        }
-    )
+    assert spec["components"]["schemas"]["ModeAwareModel.serialization"][
+        "properties"
+    ] == {
+        "name": {"type": "string"},
+        "display_name": {"type": "string"},
+    }
 
 
-def test_generate_spec_does_not_mutate_registered_schema(
+def test_generate_spec_is_deterministic_and_does_not_mutate_registry(
     model_case,
     monkeypatch,
 ):
@@ -611,10 +600,9 @@ def test_generate_spec_does_not_mutate_registered_schema(
     api = SpecTree(
         "flask",
         naming_strategy=lambda model: (
-            "QueryModel"
-            if model is target_model
-            else "ValidationError"
+            "QueryModel" if model is target_model else "ValidationError"
         ),
+        nested_naming_strategy=lambda parent, child: f"{parent}.{child}",
         model_adapter=model_case.adapter,
     )
 
@@ -657,17 +645,17 @@ def test_generate_spec_does_not_mutate_registered_schema(
 
     api.register(app)
 
-    before = json_compatible_deepcopy(dict(api.models))
+    before = api.models.snapshot()
 
     with app.app_context():
-        first_spec = api.spec
+        first_spec = api._generate_spec()
 
-    after_first = json_compatible_deepcopy(dict(api.models))
+    after_first = api.models.snapshot()
 
     with app.app_context():
         second_spec = api._generate_spec()
 
-    after_second = json_compatible_deepcopy(dict(api.models))
+    after_second = api.models.snapshot()
 
     assert before == after_first
     assert after_first == after_second
@@ -712,6 +700,34 @@ def test_response_declaration_is_not_mutated_by_spectree(
 
     assert response_endpoint.resp is not response
     assert response_endpoint.resp.model_adapter is api.model_adapter
+
+
+def test_response_copy_does_not_share_mutable_state(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="SharedResponseModel",
+    )
+
+    response = Response(
+        HTTP_200=(model, "OK"),
+    )
+
+    compiled = response.copy_for_model_adapter(
+        SpecTree(
+            "flask",
+            model_adapter=model_case.adapter,
+        ).model_adapter,
+    )
+
+    compiled.code_descriptions["HTTP_200"] = "changed"
+    compiled._model_keys["HTTP_200"] = "response"
+
+    assert response.code_descriptions["HTTP_200"] == "OK"
+    assert response._model_keys == {}
+    assert response.model_adapter is None
+    assert response.code_models == {}
 
 
 def test_response_can_be_reused_by_different_model_adapters(
@@ -775,7 +791,7 @@ def test_runtime_does_not_resolve_unrelated_annotations():
 
     def endpoint(
         json: DemoModel,
-        dependency: "CompletelyNonExistentType",
+        dependency: "CompletelyNonExistentType",  # noqa F821
     ):
         return {"ok": True}
 
@@ -796,6 +812,7 @@ def test_runtime_does_not_resolve_unrelated_annotations():
         )
 
     assert response.status_code != 500
+
 
 def test_runtime_ignores_unresolvable_return_annotation():
     app = Flask(__name__)
@@ -820,3 +837,457 @@ def test_runtime_ignores_unresolvable_return_annotation():
     assert response.status_code != 500
 
 
+def test_spec_generation_does_not_depend_on_previous_spec_access(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="StableModel",
+    )
+
+    api = SpecTree(
+        "flask",
+        model_adapter=model_case.adapter,
+    )
+
+    app = Flask(__name__)
+
+    @app.route("/stable")
+    @api.validate(query=model)
+    def stable():
+        return "ok"
+
+    api.register(app)
+
+    with app.app_context():
+        generated_before = api._generate_spec()
+        cached_spec = api.spec
+        generated_after = api._generate_spec()
+
+    assert generated_before == cached_spec
+    assert generated_before == generated_after
+
+
+def test_response_can_produce_independent_bound_copies(
+    model_case,
+):
+    model = model_case.get_model(
+        dict[str, str],
+        name="IndependentResponseModel",
+    )
+
+    response = Response(HTTP_200=model)
+
+    api = SpecTree(
+        "flask",
+        model_adapter=model_case.adapter,
+    )
+
+    first = response.copy_for_model_adapter(
+        api.model_adapter,
+    )
+    second = response.copy_for_model_adapter(
+        api.model_adapter,
+    )
+
+    assert first is not second
+    assert first.code_models is not second.code_models
+    assert first.code_descriptions is not second.code_descriptions
+    assert first._model_keys is not second._model_keys
+
+    first._set_model_key("HTTP_200", "First")
+    second._set_model_key("HTTP_200", "Second")
+
+    assert first._model_keys == {"HTTP_200": "First"}
+    assert second._model_keys == {"HTTP_200": "Second"}
+
+    assert response._model_keys == {}
+
+
+def test_endpoint_spec_is_immutable():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(
+        query=Query,
+        tags=("users",),
+        operation_id="users_list",
+    )
+    def endpoint():
+        return None
+
+    endpoint_spec = endpoint._endpoint_spec
+
+    with pytest.raises((AttributeError, TypeError)):
+        endpoint_spec.query = list
+
+    with pytest.raises((AttributeError, TypeError)):
+        endpoint_spec.request_model_keys = ()
+
+
+def test_reusing_validate_decorator_does_not_leak_endpoint_models():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate()
+
+    @decorator
+    def first(query: FirstQuery):
+        return query
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+
+    assert first._endpoint_spec.injected_arguments == {"query"}
+    assert second._endpoint_spec.injected_arguments == {"query"}
+
+    assert api.get_endpoint_spec(first) is first._endpoint_spec
+    assert api.get_endpoint_spec(second) is second._endpoint_spec
+
+
+def test_explicit_endpoint_models_are_isolated_between_decorations():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate(query=FirstQuery)
+
+    @decorator
+    def first():
+        return None
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+
+
+def test_endpoint_spec_is_used_as_runtime_source_of_truth():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(
+        query=Query,
+        operation_id="stable-operation",
+        tags=("stable",),
+    )
+    def endpoint():
+        return None
+
+    endpoint.operation_id = "legacy-operation"
+    endpoint.tags = ("legacy",)
+
+    endpoint_spec = endpoint._endpoint_spec
+
+    assert endpoint_spec.operation_id == "stable-operation"
+    assert endpoint_spec.tags == ("stable",)
+
+
+def test_get_endpoint_spec_handles_wrapped_functions():
+    api = SpecTree()
+
+    @api.validate()
+    def endpoint():
+        return None
+
+    @wraps(endpoint)
+    def wrapped_endpoint():
+        return endpoint()
+
+    assert api.get_endpoint_spec(endpoint) is endpoint._endpoint_spec
+    assert api.get_endpoint_spec(wrapped_endpoint) is endpoint._endpoint_spec
+
+
+def test_spec_is_invalidated_after_new_endpoint_is_decorated():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+    api.register(app)
+
+    with app.app_context():
+        first_spec = api.spec
+
+    @app.route("/new")
+    @api.validate()
+    def new_endpoint():
+        return None
+
+    with app.app_context():
+        second_spec = api.spec
+
+    assert "/new" not in first_spec["paths"]
+    assert "/new" in second_spec["paths"]
+
+
+def test_endpoint_metadata_remains_backward_compatible():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(
+        query=Query,
+        tags=("users",),
+        security={"bearerAuth": []},
+        deprecated=True,
+        operation_id="users_get",
+    )
+    def endpoint(query):
+        return query
+
+    metadata = api.get_function_metadata(endpoint)
+    endpoint_spec = api.get_endpoint_spec(endpoint)
+
+    assert metadata is not None
+    assert endpoint_spec is not None
+
+    assert metadata.query is not None
+    assert metadata.query == endpoint.query
+    assert metadata.tags == endpoint.tags
+    assert metadata.security == endpoint.security
+    assert metadata.deprecated is endpoint.deprecated
+    assert metadata.operation_id == endpoint.operation_id
+
+
+def test_skip_validation_warns_for_request_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    with pytest.warns(UserWarning, match="skip_validation"):
+
+        @api.validate(skip_validation=True)
+        def annotated(query: Query):
+            return query
+
+    assert annotated._endpoint_spec.query is Query
+    assert annotated._endpoint_spec.injected_arguments == {"query"}
+
+
+def test_endpoint_openapi_rendering_uses_endpoint_spec_not_legacy_metadata():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(
+        query=Query,
+        operation_id="endpoint-operation",
+        tags=("endpoint-tag",),
+    )
+    def endpoint():
+        return None
+
+    endpoint.operation_id = "legacy-operation"
+    endpoint.tags = ("legacy-tag",)
+
+    assert endpoint._endpoint_spec.operation_id == "endpoint-operation"
+    assert endpoint._endpoint_spec.tags == ("endpoint-tag",)
+
+
+def test_endpoint_spec_contains_resolved_schema_keys():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    @api.validate(query=Query)
+    def endpoint(query: Query):
+        return query
+
+    key = endpoint._endpoint_spec.model_key_for("query")
+
+    assert key is not None
+    assert key == endpoint.query
+    assert endpoint._endpoint_spec.model_key_for("json") is None
+
+
+def test_reusing_validate_decorator_does_not_leak_endpoint_state():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate()
+
+    @decorator
+    def first(query: FirstQuery):
+        return query
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+    assert first._endpoint_spec is not second._endpoint_spec
+
+    assert first._endpoint_spec.model_key_for("query") == first.query
+    assert second._endpoint_spec.model_key_for("query") == second.query
+
+
+def test_spec_cache_is_invalidated_after_new_endpoint():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+    api.register(app)
+
+    with app.app_context():
+        first_spec = api.spec
+
+    @app.route("/new")
+    @api.validate()
+    def new_endpoint():
+        return None
+
+    with app.app_context():
+        second_spec = api.spec
+
+    assert first_spec is not second_spec
+    assert "/new" not in first_spec["paths"]
+    assert "/new" in second_spec["paths"]
+
+
+def test_endpoint_spec_operation_id_is_used_in_generated_spec():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/users")
+    @api.validate(operation_id="users-list")
+    def users():
+        return {"ok": True}
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/users"]["get"]
+
+    assert operation["operationId"] == "users-list"
+
+
+def test_endpoint_spec_metadata_is_not_taken_from_mutated_legacy_attributes():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/users")
+    @api.validate(
+        operation_id="users-list",
+        tags=("users",),
+        deprecated=True,
+    )
+    def users():
+        return {"ok": True}
+
+    users.operation_id = "legacy-operation"
+    users.tags = ("legacy-tag",)
+    users.deprecated = False
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/users"]["get"]
+
+    assert operation["operationId"] == "users-list"
+    assert operation["tags"] == ["users"]
+    assert operation["deprecated"] is True
+
+
+def test_same_validate_decorator_keeps_independent_endpoint_specs():
+    api = SpecTree()
+
+    class FirstQuery:
+        pass
+
+    class SecondQuery:
+        pass
+
+    decorator = api.validate()
+
+    @decorator
+    def first(query: FirstQuery):
+        return query
+
+    @decorator
+    def second(query: SecondQuery):
+        return query
+
+    assert first._endpoint_spec is not second._endpoint_spec
+    assert first._endpoint_spec.query is FirstQuery
+    assert second._endpoint_spec.query is SecondQuery
+    assert first._endpoint_spec.model_key_for("query") == first.query
+    assert second._endpoint_spec.model_key_for("query") == second.query
+
+
+def test_endpoint_spec_does_not_resolve_unrelated_annotations():
+    api = SpecTree()
+
+    class Query:
+        pass
+
+    def endpoint(
+        query: Query,
+        dependency: "UnresolvableDependency",  # noqa: F821
+    ):
+        return query
+
+    decorated = api.validate()(endpoint)
+
+    assert decorated._endpoint_spec.query is Query
+    assert decorated._endpoint_spec.injected_arguments == {"query"}
+
+
+def test_endpoint_spec_isolated_when_annotation_overrides_explicit_model():
+    api = SpecTree()
+
+    class ExplicitQuery:
+        pass
+
+    class AnnotatedQuery:
+        pass
+
+    decorator = api.validate(query=ExplicitQuery)
+
+    @decorator
+    def endpoint(query: AnnotatedQuery):
+        return query
+
+    assert endpoint._endpoint_spec.query is AnnotatedQuery
+
+
+def test_non_endpoint_routes_keep_backend_operation_id_resolution():
+    app = Flask(__name__)
+    api = SpecTree("flask")
+
+    @app.route("/plain")
+    def plain():
+        return {"ok": True}
+
+    plain.operation_id = "plain-operation"
+
+    api.register(app)
+
+    with app.app_context():
+        operation = api.spec["paths"]["/plain"]["get"]
+
+    assert operation["operationId"] == "plain-operation"
