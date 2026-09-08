@@ -7,8 +7,8 @@ from quart import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
 from spectree.plugins.base import validate_response
-from spectree.request_data import RequestData
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
+from spectree.request_data import RequestData
 from spectree.response import Response
 from spectree.utils import get_multidict_items
 
@@ -31,10 +31,19 @@ class QuartPlugin(WerkzeugPlugin):
         has_data = request.method not in ("GET", "DELETE")
         use_json = endpoint.json and has_data and request.mimetype == "application/json"
         use_form = endpoint.form and has_data and any(x in request.mimetype for x in self.FORM_MIMETYPE)
+
+        req_form = None
+        if use_form:
+            form = await request.form
+            files = await request.files
+            req_form = get_multidict_items(form, endpoint.form)
+            if files:
+                req_form.update(get_multidict_items(files, endpoint.form))
+
         return RequestData(
             query=get_multidict_items(request.args, endpoint.query),
             json=(await request.get_json(silent=True) or {}) if use_json else None,
-            form=self.fill_form(request) if use_form else None,
+            form=req_form,
             headers=dict(request.headers) or {},
             cookies=get_multidict_items(request.cookies) or {},
         )
