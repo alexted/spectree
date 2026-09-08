@@ -7,11 +7,18 @@ from typing import Any
 
 try:
     from tempfile import SpooledTemporaryFile
+
     CachedFile = partial(SpooledTemporaryFile, max_size=1024 * 1024)
 except ImportError:
     from io import BytesIO as CachedFile  # type: ignore[assignment]
 
-from falcon import MEDIA_HTML, MEDIA_JSON, Request as FalconRequest, Response as FalconResponse, http_status_to_code
+from falcon import (
+    MEDIA_HTML,
+    MEDIA_JSON,
+    Request as FalconRequest,
+    Response as FalconResponse,
+    http_status_to_code,
+)
 from falcon.asgi import Request as FalconASGIRequest
 from falcon.asgi.reader import BufferedReader as ASGIBufferedReader
 from falcon.routing.compiled import _FIELD_PATTERN as FALCON_FIELD_PATTERN
@@ -125,23 +132,37 @@ class FalconPlugin(BasePlugin):
         self.ESCAPE = "[" + re.escape(r".()[]?$*+^|") + "]"
         self.ESCAPE_TO = r"\\\g<0>"
         self.EXTRACT = r"{\2}"
-        self.INT_ARGS = re.compile(r"((?P<name>\w+)\s*=\s*)?(?P<value>\d+)\s*", re.VERBOSE)
+        self.INT_ARGS = re.compile(
+            r"((?P<name>\w+)\s*=\s*)?(?P<value>\d+)\s*",
+            re.VERBOSE,
+        )
         self.INT_ARGS_NAMES = ("num_digits", "min", "max")
 
     def register_route(self, app: Any):
-        app.add_route(self.config.spec_url, self.OPEN_API_ROUTE_CLASS(self.spectree.spec))
+        app.add_route(
+            self.config.spec_url,
+            self.OPEN_API_ROUTE_CLASS(self.spectree.spec),
+        )
         for ui in self.config.page_templates:
-            app.add_route(f"/{self.config.path}/{ui}", self.DOC_PAGE_ROUTE_CLASS(
-                self.config.page_templates[ui], spec_url=self.config.filename,
-                spec_path=self.config.path, **self.config.swagger_oauth2_config()))
+            app.add_route(
+                f"/{self.config.path}/{ui}",
+                self.DOC_PAGE_ROUTE_CLASS(
+                    self.config.page_templates[ui],
+                    spec_url=self.config.filename,
+                    spec_path=self.config.path,
+                    **self.config.swagger_oauth2_config(),
+                ),
+            )
 
     def find_routes(self):
         routes = []
+
         def find_node(node):
             if node.resource and node.resource.__class__.__name__ not in DOC_CLASS:
                 routes.append(node)
             for child in node.children:
                 find_node(child)
+
         for route in self.spectree.app._router._roots:
             find_node(route)
         return routes
@@ -159,7 +180,10 @@ class FalconPlugin(BasePlugin):
             escaped = re.sub(self.ESCAPE, self.ESCAPE_TO, segment)
             subs.append(FALCON_FIELD_PATTERN.sub(self.EXTRACT, escaped))
             for field in matches:
-                variable, converter, argstr = [field.group(name) for name in ("fname", "cname", "argstr")]
+                variable, converter, argstr = [
+                    field.group(name)
+                    for name in ("fname", "cname", "argstr")
+                ]
                 if converter == "int":
                     arg_values = [None, None, None]
                     for i, match in enumerate(self.INT_ARGS.finditer(argstr or "")):
@@ -167,7 +191,10 @@ class FalconPlugin(BasePlugin):
                         index = self.INT_ARGS_NAMES.index(name) if name else i
                         arg_values[index] = value
                     num_digits, minimum, maximum = arg_values
-                    schema = {"type": "integer", "format": f"int{num_digits}" if num_digits else "int32"}
+                    schema = {
+                        "type": "integer",
+                        "format": f"int{num_digits}" if num_digits else "int32",
+                    }
                     if minimum:
                         schema["minimum"] = minimum
                     if maximum:
@@ -178,11 +205,27 @@ class FalconPlugin(BasePlugin):
                     schema = {"type": "string", "format": "date-time"}
                 else:
                     schema = {"type": "string"}
-                description = path_parameter_descriptions.get(variable, "") if path_parameter_descriptions else ""
-                parameters.append({"name": variable, "in": "path", "required": True, "schema": schema, "description": description})
+                description = (
+                    path_parameter_descriptions.get(variable, "")
+                    if path_parameter_descriptions
+                    else ""
+                )
+                parameters.append(
+                    {
+                        "name": variable,
+                        "in": "path",
+                        "required": True,
+                        "schema": schema,
+                        "description": description,
+                    }
+                )
         return f"/{'/'.join(subs)}", parameters
 
-    def get_request_data(self, req: FalconRequest, endpoint: EndpointSpec) -> RequestData:
+    def get_request_data(
+        self,
+        req: FalconRequest,
+        endpoint: EndpointSpec,
+    ) -> RequestData:
         req_form = None
         if endpoint.form and req.content_type:
             req_form = {}
@@ -199,17 +242,28 @@ class FalconPlugin(BasePlugin):
             query=dict(req.params),
             json=req.get_media(default_when_empty={}) if endpoint.json else None,
             form=req_form,
-            headers=req.headers,
-            cookies=req.cookies,
+            headers=dict(req.headers),
+            cookies=dict(req.cookies),
         )
 
-    def validate_response(self, resp: FalconResponse, resp_model: Response | None, skip_validation: bool, force_resp_serialize: bool):
+    def validate_response(
+        self,
+        resp: FalconResponse,
+        resp_model: Response | None,
+        skip_validation: bool,
+        force_resp_serialize: bool,
+    ):
         resp_validation_error = None
         if not self._data_set_manually(resp):
             if not skip_validation and resp_model:
                 try:
                     status = http_status_to_code(resp.status)
-                    result = validate_response(self.model_adapter, resp_model.find_model(status), resp.media, force_resp_serialize)
+                    result = validate_response(
+                        self.model_adapter,
+                        resp_model.find_model(status),
+                        resp.media,
+                        force_resp_serialize,
+                    )
                 except self.model_adapter.validation_error as err:
                     resp_validation_error = err
                     resp.status = HTTP_500
@@ -225,7 +279,13 @@ class FalconPlugin(BasePlugin):
                 resp.content_type = MEDIA_JSON
         return resp_validation_error
 
-    def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
+    def validate(
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
+    ):
         _self, req, resp = args[:3]
         request_data = self.get_request_data(req, endpoint)
         req_validation_error = None
@@ -237,13 +297,30 @@ class FalconPlugin(BasePlugin):
                 resp.status = f"{endpoint.validation_error_status} Validation Error"
                 resp.media = self.model_adapter.validation_errors(err)
         self.set_request_data(req, request_data)
-        endpoint.before(req, resp, req_validation_error, _self, self.model_adapter)
+        endpoint.before(
+            req,
+            resp,
+            req_validation_error,
+            _self,
+            self.model_adapter,
+        )
         if req_validation_error:
             return None
         self.inject_request_data(request_data, endpoint, kwargs)
         result = func(*args, **kwargs)
-        resp_validation_error = self.validate_response(resp, endpoint.response, endpoint.skip_validation, endpoint.force_resp_serialize)
-        endpoint.after(req, resp, resp_validation_error, _self, self.model_adapter)
+        resp_validation_error = self.validate_response(
+            resp,
+            endpoint.response,
+            endpoint.skip_validation,
+            endpoint.force_resp_serialize,
+        )
+        endpoint.after(
+            req,
+            resp,
+            resp_validation_error,
+            _self,
+            self.model_adapter,
+        )
         return result
 
     @staticmethod
@@ -259,7 +336,11 @@ class FalconAsgiPlugin(FalconPlugin):
     OPEN_API_ROUTE_CLASS = OpenAPIAsgi
     DOC_PAGE_ROUTE_CLASS = DocPageAsgi
 
-    async def get_request_data(self, req: FalconASGIRequest, endpoint: EndpointSpec) -> RequestData:
+    async def get_request_data(
+        self,
+        req: FalconASGIRequest,
+        endpoint: EndpointSpec,
+    ) -> RequestData:
         req_form = None
         if endpoint.form and req.content_type:
             req_form = {}
@@ -276,11 +357,17 @@ class FalconAsgiPlugin(FalconPlugin):
             query=dict(req.params),
             json=await req.get_media(default_when_empty={}) if endpoint.json else None,
             form=req_form,
-            headers=req.headers,
-            cookies=req.cookies,
+            headers=dict(req.headers),
+            cookies=dict(req.cookies),
         )
 
-    async def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
+    async def validate(
+        self,
+        func: Callable,
+        endpoint: EndpointSpec,
+        *args: Any,
+        **kwargs: Any,
+    ):
         _self, req, resp = args[:3]
         request_data = await self.get_request_data(req, endpoint)
         req_validation_error = None
@@ -292,11 +379,32 @@ class FalconAsgiPlugin(FalconPlugin):
                 resp.status = f"{endpoint.validation_error_status} Validation Error"
                 resp.media = self.model_adapter.validation_errors(err)
         self.set_request_data(req, request_data)
-        endpoint.before(req, resp, req_validation_error, _self, self.model_adapter)
+        endpoint.before(
+            req,
+            resp,
+            req_validation_error,
+            _self,
+            self.model_adapter,
+        )
         if req_validation_error:
             return None
         self.inject_request_data(request_data, endpoint, kwargs)
-        result = await func(*args, **kwargs) if inspect.iscoroutinefunction(func) else func(*args, **kwargs)
-        resp_validation_error = self.validate_response(resp, endpoint.response, endpoint.skip_validation, endpoint.force_resp_serialize)
-        endpoint.after(req, resp, resp_validation_error, _self, self.model_adapter)
+        result = (
+            await func(*args, **kwargs)
+            if inspect.iscoroutinefunction(func)
+            else func(*args, **kwargs)
+        )
+        resp_validation_error = self.validate_response(
+            resp,
+            endpoint.response,
+            endpoint.skip_validation,
+            endpoint.force_resp_serialize,
+        )
+        endpoint.after(
+            req,
+            resp,
+            resp_validation_error,
+            _self,
+            self.model_adapter,
+        )
         return result
