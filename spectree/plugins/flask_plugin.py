@@ -6,8 +6,8 @@ from flask import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
 from spectree.plugins.base import validate_response
-from spectree.request_data import RequestData
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
+from spectree.request_data import RequestData
 from spectree.response import Response
 from spectree.utils import get_multidict_items
 
@@ -112,7 +112,7 @@ class FlaskPlugin(WerkzeugPlugin):
         except self.model_adapter.validation_error as err:
             req_validation_error = err
             response = make_response(
-                self.model_adapter.validation_errors(err),
+                jsonify(self.model_adapter.validation_errors(err)),
                 endpoint.validation_error_status,
             )
 
@@ -143,3 +143,5 @@ class FlaskPlugin(WerkzeugPlugin):
             self.model_adapter,
         )
         return response
+
+# eof
