@@ -99,6 +99,7 @@ class StarlettePlugin(BasePlugin):
         request_data = RequestData()
         response = None
         req_validation_error = None
+        resp_validation_error = None
         json_decode_error = None
 
         try:
@@ -140,7 +141,7 @@ class StarlettePlugin(BasePlugin):
                 if isinstance(result.payload, bytes):
                     response.body = result.payload
 
-        endpoint.after(request, response, locals().get("resp_validation_error"), instance, self.model_adapter)
+        endpoint.after(request, response, resp_validation_error, instance, self.model_adapter)
         return response
 
     def find_routes(self):
