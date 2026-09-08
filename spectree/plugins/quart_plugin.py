@@ -6,7 +6,8 @@ import quart
 from quart import Blueprint, abort, current_app, jsonify, make_response, request
 
 from spectree.endpoint import EndpointSpec
-from spectree.plugins.base import Context, validate_response
+from spectree.plugins.base import BasePlugin, validate_response
+from spectree.request_data import RequestData
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
 from spectree.response import Response
 from spectree.utils import get_multidict_items
@@ -26,36 +27,21 @@ class QuartPlugin(WerkzeugPlugin):
     def is_blueprint(app: Any) -> bool:
         return isinstance(app, Blueprint)
 
-    async def request_validation(self, request, query, json, form, headers, cookies):
-        """
-        req_query: werkzeug.datastructures.ImmutableMultiDict
-        req_json: dict
-        req_headers: werkzeug.datastructures.EnvironHeaders
-        req_cookies: werkzeug.datastructures.ImmutableMultiDict
-        """
-        req_query = get_multidict_items(request.args)
-        req_headers = dict(iter(request.headers)) or {}
-        req_cookies = get_multidict_items(request.cookies) or {}
+    async def get_request_data(self, request, endpoint: EndpointSpec) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
-        use_json = json and has_data and request.mimetype == "application/json"
+        use_json = endpoint.json and has_data and request.mimetype == "application/json"
         use_form = (
-            form
+            endpoint.form
             and has_data
-            and any([x in request.mimetype for x in self.FORM_MIMETYPE])
+            and any(x in request.mimetype for x in self.FORM_MIMETYPE)
         )
 
-        request.context = Context(
-            self.model_adapter.validate_obj(query, req_query) if query else None,
-            self.model_adapter.validate_obj(
-                json, await request.get_json(silent=True) or {}
-            )
-            if use_json
-            else None,
-            self.model_adapter.validate_obj(form, self.fill_form(request))
-            if use_form
-            else None,
-            self.model_adapter.validate_obj(headers, req_headers) if headers else None,
-            self.model_adapter.validate_obj(cookies, req_cookies) if cookies else None,
+        return RequestData(
+            query=get_multidict_items(request.args, endpoint.query),
+            json=(await request.get_json(silent=True) or {}) if use_json else None,
+            form=self.fill_form(request) if use_form else None,
+            headers=dict(request.headers) or {},
+            cookies=get_multidict_items(request.cookies) or {},
         )
 
     async def validate_response(
@@ -71,11 +57,8 @@ class QuartPlugin(WerkzeugPlugin):
         if self.is_app_response(payload):
             resp_status, resp_headers = payload.status_code, payload.headers
             payload = await payload.get_data()
-            # the inner flask.Response.status_code only takes effect when there is
-            # no other status code
             if status == 200:
                 status = resp_status
-            # use the `Header` object to avoid deduplicated by `make_response`
             resp_headers.extend(additional_headers)
             additional_headers = resp_headers
 
@@ -112,36 +95,22 @@ class QuartPlugin(WerkzeugPlugin):
 
         return response, resp_validation_error
 
-    async def validate(
-        self,
-        func: Callable,
-        endpoint: EndpointSpec,
-        *args: Any,
-        **kwargs: Any,
-    ):
-        response, req_validation_error, resp_validation_error = (
-            None,
-            None,
-            None,
-        )
+    async def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
+        request_data = RequestData()
+        response = None
+        req_validation_error = None
 
-        if not endpoint.skip_validation:
-            try:
-                await self.request_validation(
-                    request,
-                    endpoint.query,
-                    endpoint.json,
-                    endpoint.form,
-                    endpoint.headers,
-                    endpoint.cookies,
-                )
-            except self.model_adapter.validation_error as err:
-                req_validation_error = err
-                errors = self.model_adapter.validation_errors(err)
-                response = await make_response(
-                    jsonify(errors),
-                    endpoint.validation_error_status,
-                )
+        try:
+            request_data = await self.get_request_data(request, endpoint)
+            if not endpoint.skip_validation:
+                request_data = self.validate_request_data(request_data, endpoint)
+            self.set_request_data(request, request_data)
+        except self.model_adapter.validation_error as err:
+            req_validation_error = err
+            response = await make_response(
+                jsonify(self.model_adapter.validation_errors(err)),
+                endpoint.validation_error_status,
+            )
 
         endpoint.before(
             request,
@@ -151,22 +120,12 @@ class QuartPlugin(WerkzeugPlugin):
             self.model_adapter,
         )
 
-        if req_validation_error:
+        if req_validation_error is not None:
             assert response
             abort(response)
 
-        for name in endpoint.injected_arguments:
-            kwargs[name] = getattr(
-                getattr(request, "context", None),
-                name,
-                None,
-            )
-
-        result = (
-            await func(*args, **kwargs)
-            if inspect.iscoroutinefunction(func)
-            else func(*args, **kwargs)
-        )
+        self.inject_request_data(request_data, endpoint, kwargs)
+        result = await func(*args, **kwargs) if inspect.iscoroutinefunction(func) else func(*args, **kwargs)
 
         response, resp_validation_error = await self.validate_response(
             result,
@@ -182,5 +141,4 @@ class QuartPlugin(WerkzeugPlugin):
             None,
             self.model_adapter,
         )
-
         return response
