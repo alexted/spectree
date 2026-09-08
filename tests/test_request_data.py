@@ -102,6 +102,16 @@ def test_validate_request_data_preserves_unmodeled_fields():
     assert result.cookies == raw.cookies
 
 
+def test_validate_request_data_does_not_validate_missing_values():
+    plugin = make_plugin()
+    model = object()
+    endpoint = make_endpoint(json=model, form=model)
+
+    result = plugin.validate_request_data(RequestData(), endpoint)
+
+    assert result == RequestData()
+
+
 def test_inject_request_data_uses_only_declared_arguments():
     plugin = make_plugin()
     data = RequestData(
