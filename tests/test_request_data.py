@@ -194,6 +194,30 @@ def test_set_request_data_replaces_existing_request_data_context():
     assert request.context is request_data
 
 
+def test_set_request_data_updates_mapping_context():
+    context = {"keep": "value"}
+    request = SimpleNamespace(context=context)
+    request_data = RequestData(
+        query={"q": "1"},
+        json={"name": "alice"},
+        form={"field": "value"},
+        headers={"X-Test": "yes"},
+        cookies={"session": "abc"},
+    )
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is context
+    assert context == {
+        "keep": "value",
+        "query": request_data.query,
+        "json": request_data.json,
+        "form": request_data.form,
+        "headers": request_data.headers,
+        "cookies": request_data.cookies,
+    }
+
+
 def test_set_request_data_preserves_framework_context_object():
     context = SimpleNamespace(
         keep="value",
