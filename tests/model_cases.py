@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, is_dataclass
 from functools import lru_cache
 from types import GenericAlias
 from typing import (
@@ -14,7 +14,6 @@ from typing import (
     cast,
     get_args,
     get_origin,
-    get_type_hints,
 )
 
 import pytest
@@ -78,17 +77,6 @@ class ModelCase:
         return GenericAlias(list, (model,))
 
 
-def _dataclass_field_types(model_def: type[Any]) -> list[tuple[Any, Any]]:
-    if not is_dataclass(model_def):
-        raise TypeError(f"{model_def!r} is not a dataclass")
-
-    type_hints = get_type_hints(model_def, include_extras=True)
-    return [
-        (model_field, type_hints.get(model_field.name, model_field.type))
-        for model_field in fields(model_def)
-    ]
-
-
 def _build_model_resolver(
     adapter: ModelAdapterType,
 ) -> ModelResolver:
@@ -116,10 +104,10 @@ def _build_model_resolver(
         if model_def is None:
             return None
 
-        converted_def = convert_type_def(model_def)
         if is_dataclass(model_def):
-            return converted_def
+            return model_def
 
+        converted_def = convert_type_def(model_def)
         origin = get_origin(model_def)
         if origin is list and name is None:
             item_model = get_args(converted_def)[0]
