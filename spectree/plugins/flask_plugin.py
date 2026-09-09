@@ -64,7 +64,10 @@ class FlaskPlugin(WerkzeugPlugin):
                     force_resp_serialize,
                 )
             except self.model_adapter.validation_error as err:
-                response = make_response(self.model_adapter.validation_errors(err), 500)
+                response = make_response(
+                    self.model_adapter.validation_errors(err),
+                    500,
+                )
                 resp_validation_error = err
             else:
                 response = make_response(
@@ -94,13 +97,14 @@ class FlaskPlugin(WerkzeugPlugin):
         ):
             return func(*args, **kwargs)
 
-        request_data = self.get_request_data(request, endpoint)
+        request_data = RequestData()
         response = None
         req_validation_error = None
         try:
             if not endpoint.skip_validation:
+                request_data = self.get_request_data(request, endpoint)
                 request_data = self.validate_request_data(request_data, endpoint)
-            self.set_request_data(request, request_data)
+                self.set_request_data(request, request_data)
         except self.model_adapter.validation_error as err:
             req_validation_error = err
             response = make_response(
