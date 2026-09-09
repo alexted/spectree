@@ -10,11 +10,14 @@ from spectree.request_data import RequestData
 class StubAdapter:
     validation_error = ValueError
 
-    def __init__(self):
+    def __init__(self, *, fail_on_model=None):
         self.calls = []
+        self.fail_on_model = fail_on_model
 
     def validate_obj(self, model, value):
         self.calls.append((model, value))
+        if model is self.fail_on_model:
+            raise self.validation_error("invalid request data")
         return model, value
 
 
@@ -43,9 +46,9 @@ def make_endpoint(**overrides):
     return EndpointSpec(**values)
 
 
-def make_plugin():
+def make_plugin(*, fail_on_model=None):
     plugin = BasePlugin.__new__(BasePlugin)
-    plugin.model_adapter = StubAdapter()
+    plugin.model_adapter = StubAdapter(fail_on_model=fail_on_model)
     return plugin
 
 
@@ -116,9 +119,7 @@ def test_request_data_validation_drops_unmodeled_values():
         cookies={"session": "abc"},
     )
 
-    endpoint = make_endpoint(
-        query=object(),
-    )
+    endpoint = make_endpoint(query=object())
 
     result = plugin.validate_request_data(raw, endpoint)
 
@@ -127,6 +128,31 @@ def test_request_data_validation_drops_unmodeled_values():
     assert result.form is None
     assert result.headers is None
     assert result.cookies is None
+
+
+def test_request_data_validation_is_atomic_on_error():
+    failing_model = object()
+    plugin = make_plugin(fail_on_model=failing_model)
+    raw = RequestData(
+        query={"q": "1"},
+        json={"name": "alice"},
+    )
+    endpoint = make_endpoint(
+        query=object(),
+        json=failing_model,
+    )
+
+    with pytest.raises(ValueError, match="invalid request data"):
+        plugin.validate_request_data(raw, endpoint)
+
+    assert raw == RequestData(
+        query={"q": "1"},
+        json={"name": "alice"},
+    )
+    assert plugin.model_adapter.calls == [
+        (endpoint.query, raw.query),
+        (failing_model, raw.json),
+    ]
 
 
 def test_request_data_validation_does_not_call_adapter_for_none():
@@ -172,6 +198,18 @@ def test_request_data_injection_uses_only_declared_arguments():
         "query": {"q": "1"},
         "json": {"name": "alice"},
     }
+
+
+def test_request_data_injection_does_not_mutate_request_data():
+    plugin = make_plugin()
+    request_data = RequestData(json={"name": "alice"})
+    endpoint = make_endpoint(injected_arguments=frozenset({"json"}))
+    kwargs = {}
+
+    plugin.inject_request_data(request_data, endpoint, kwargs)
+
+    assert kwargs == {"json": {"name": "alice"}}
+    assert request_data == RequestData(json={"name": "alice"})
 
 
 def test_set_request_data_replaces_missing_context():
@@ -265,20 +303,14 @@ def test_set_request_data_preserves_framework_context_object():
     assert context.cookies == request_data.cookies
 
 
-def test_request_data_is_not_mutated_by_set_request_data():
-    request = SimpleNamespace(context=None)
-    request_data = RequestData(
-        query={"q": "1"},
-        json={"name": "alice"},
-    )
+def test_set_request_data_is_atomic_for_context_assignment():
+    class Request:
+        context = property(lambda self: None)
 
-    BasePlugin.set_request_data(request, request_data)
+    request_data = RequestData(json={"name": "alice"})
 
-    assert request.context is request_data
-    assert request_data == RequestData(
-        query={"q": "1"},
-        json={"name": "alice"},
-    )
+    with pytest.raises(AttributeError):
+        BasePlugin.set_request_data(Request(), request_data)
 
 
 def test_base_plugin_exposes_request_extraction_boundary():
