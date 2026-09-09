@@ -30,11 +30,7 @@ class QuartPlugin(WerkzeugPlugin):
     async def get_request_data(self, request, endpoint: EndpointSpec) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
         use_json = endpoint.json and has_data and request.mimetype == "application/json"
-        use_form = (
-            endpoint.form
-            and has_data
-            and any(x in request.mimetype for x in self.FORM_MIMETYPE)
-        )
+        use_form = endpoint.form and has_data and request.mimetype in self.FORM_MIMETYPE
 
         req_form = None
         if use_form:
