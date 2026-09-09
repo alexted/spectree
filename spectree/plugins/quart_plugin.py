@@ -110,13 +110,14 @@ class QuartPlugin(WerkzeugPlugin):
     async def validate(
         self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any
     ):
-        request_data = await self.get_request_data(request, endpoint)
+        request_data = RequestData()
         response = None
         req_validation_error = None
         try:
             if not endpoint.skip_validation:
+                request_data = await self.get_request_data(request, endpoint)
                 request_data = self.validate_request_data(request_data, endpoint)
-            self.set_request_data(request, request_data)
+                self.set_request_data(request, request_data)
         except self.model_adapter.validation_error as err:
             req_validation_error = err
             response = await make_response(
