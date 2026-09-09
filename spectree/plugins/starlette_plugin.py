@@ -95,10 +95,7 @@ class StarlettePlugin(BasePlugin):
 
         req_json = None
         if use_json:
-            try:
-                req_json = await request.json()
-            except JSONDecodeError:
-                raise
+            req_json = await request.json()
             if req_json is None:
                 req_json = {}
 
