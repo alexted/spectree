@@ -70,7 +70,9 @@ class AsyncStreamWrapper(StreamWrapper):
         return obj
 
     async def read(self, size: int | None = -1, /) -> bytes:
-        return await asyncio.get_running_loop().run_in_executor(None, super().read, size)
+        return await asyncio.get_running_loop().run_in_executor(
+            None, super().read, size
+        )
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         chunk = await self.read(DEFAULT_CHUNK_SIZE)
@@ -181,8 +183,7 @@ class FalconPlugin(BasePlugin):
             subs.append(FALCON_FIELD_PATTERN.sub(self.EXTRACT, escaped))
             for field in matches:
                 variable, converter, argstr = [
-                    field.group(name)
-                    for name in ("fname", "cname", "argstr")
+                    field.group(name) for name in ("fname", "cname", "argstr")
                 ]
                 if converter == "int":
                     arg_values = [None, None, None]

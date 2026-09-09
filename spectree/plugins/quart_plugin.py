@@ -27,15 +27,9 @@ class QuartPlugin(WerkzeugPlugin):
     def is_blueprint(app: Any) -> bool:
         return isinstance(app, Blueprint)
 
-    async def get_request_data(
-        self, request, endpoint: EndpointSpec
-    ) -> RequestData:
+    async def get_request_data(self, request, endpoint: EndpointSpec) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
-        use_json = (
-            endpoint.json
-            and has_data
-            and request.mimetype == "application/json"
-        )
+        use_json = endpoint.json and has_data and request.mimetype == "application/json"
         use_form = (
             endpoint.form
             and has_data

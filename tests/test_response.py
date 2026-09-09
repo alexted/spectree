@@ -1,6 +1,6 @@
-import pytest
 from typing import Annotated
 
+import pytest
 
 from spectree import get_msgspec_model_adapter, get_pydantic_model_adapter
 from spectree.response import DEFAULT_CODE_DESC, Response

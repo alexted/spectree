@@ -8,7 +8,13 @@ from spectree.request_data import RequestData
 
 
 class StubAdapter:
+    validation_error = ValueError
+
+    def __init__(self):
+        self.calls = []
+
     def validate_obj(self, model, value):
+        self.calls.append((model, value))
         return model, value
 
 
@@ -43,18 +49,19 @@ def make_plugin():
     return plugin
 
 
-def test_request_data_is_immutable_and_slotted():
-    data = RequestData(json={"name": "alice"})
+def test_request_data_is_frozen_and_slotted():
+    request_data = RequestData(json={"name": "alice"})
 
     with pytest.raises(AttributeError):
-        data.json = {}
+        request_data.json = {"name": "bob"}
 
     with pytest.raises(AttributeError):
-        data.extra = "value"
+        request_data.extra = "value"
 
 
-def test_validate_request_data_validates_all_declared_models():
+def test_request_data_validation_covers_all_request_fields():
     plugin = make_plugin()
+
     models = {
         "query": object(),
         "json": object(),
@@ -62,6 +69,7 @@ def test_validate_request_data_validates_all_declared_models():
         "headers": object(),
         "cookies": object(),
     }
+
     raw = RequestData(
         query={"q": "1"},
         json={"name": "alice"},
@@ -69,7 +77,14 @@ def test_validate_request_data_validates_all_declared_models():
         headers={"X-Test": "yes"},
         cookies={"session": "abc"},
     )
-    endpoint = make_endpoint(**models)
+
+    endpoint = make_endpoint(
+        query=models["query"],
+        json=models["json"],
+        form=models["form"],
+        headers=models["headers"],
+        cookies=models["cookies"],
+    )
 
     result = plugin.validate_request_data(raw, endpoint)
 
@@ -81,9 +96,18 @@ def test_validate_request_data_validates_all_declared_models():
         cookies=(models["cookies"], raw.cookies),
     )
 
+    assert plugin.model_adapter.calls == [
+        (models["query"], raw.query),
+        (models["json"], raw.json),
+        (models["form"], raw.form),
+        (models["headers"], raw.headers),
+        (models["cookies"], raw.cookies),
+    ]
 
-def test_validate_request_data_preserves_unmodeled_fields():
+
+def test_request_data_validation_drops_unmodeled_values():
     plugin = make_plugin()
+
     raw = RequestData(
         query={"q": "1"},
         json={"name": "alice"},
@@ -91,96 +115,134 @@ def test_validate_request_data_preserves_unmodeled_fields():
         headers={"X-Test": "yes"},
         cookies={"session": "abc"},
     )
-    endpoint = make_endpoint(json=object())
+
+    endpoint = make_endpoint(
+        query=object(),
+    )
 
     result = plugin.validate_request_data(raw, endpoint)
 
-    assert result.query == raw.query
-    assert result.json == (endpoint.json, raw.json)
-    assert result.form == raw.form
-    assert result.headers == raw.headers
-    assert result.cookies == raw.cookies
+    assert result.query[1] == raw.query
+    assert result.json is None
+    assert result.form is None
+    assert result.headers is None
+    assert result.cookies is None
 
 
-def test_validate_request_data_does_not_validate_missing_values():
+def test_request_data_validation_does_not_call_adapter_for_none():
     plugin = make_plugin()
+
     model = object()
-    endpoint = make_endpoint(json=model, form=model)
+    endpoint = make_endpoint(json=model)
 
-    result = plugin.validate_request_data(RequestData(), endpoint)
+    result = plugin.validate_request_data(
+        RequestData(json=None),
+        endpoint,
+    )
 
-    assert result == RequestData()
+    assert result.json is None
+    assert plugin.model_adapter.calls == []
 
 
-def test_inject_request_data_uses_only_declared_arguments():
+def test_request_data_injection_uses_only_declared_arguments():
     plugin = make_plugin()
-    data = RequestData(
+
+    request_data = RequestData(
         query={"q": "1"},
         json={"name": "alice"},
         form={"field": "value"},
         headers={"X-Test": "yes"},
         cookies={"session": "abc"},
     )
-    endpoint = make_endpoint(injected_arguments=frozenset({"query", "json"}))
+
+    endpoint = make_endpoint(
+        injected_arguments=frozenset({"query", "json"}),
+    )
+
     kwargs = {"existing": True}
 
-    plugin.inject_request_data(data, endpoint, kwargs)
+    plugin.inject_request_data(
+        request_data,
+        endpoint,
+        kwargs,
+    )
 
-    assert kwargs == {"existing": True, "query": data.query, "json": data.json}
-
-
-def test_set_request_data_uses_request_data_as_context_when_missing():
-    request = SimpleNamespace(context=None)
-    data = RequestData(json={"name": "alice"})
-
-    BasePlugin.set_request_data(request, data)
-
-    assert request.context is data
-
-
-def test_set_request_data_replaces_previous_request_data_context():
-    request = SimpleNamespace(context=RequestData(json={"old": True}))
-    data = RequestData(json={"new": True})
-
-    BasePlugin.set_request_data(request, data)
-
-    assert request.context is data
-
-
-def test_set_request_data_preserves_application_context_attributes():
-    context = SimpleNamespace(application_value="keep")
-    request = SimpleNamespace(context=context)
-    data = RequestData(json={"name": "alice"})
-
-    BasePlugin.set_request_data(request, data)
-
-    assert request.context is context
-    assert context.application_value == "keep"
-    assert context.query is None
-    assert context.json == data.json
-    assert context.form is None
-    assert context.headers is None
-    assert context.cookies is None
-
-
-def test_set_request_data_supports_mapping_contexts():
-    context = {}
-    request = SimpleNamespace(context=context)
-    data = RequestData(json={"name": "alice"})
-
-    BasePlugin.set_request_data(request, data)
-
-    assert context == {
-        "query": None,
-        "json": data.json,
-        "form": None,
-        "headers": None,
-        "cookies": None,
+    assert kwargs == {
+        "existing": True,
+        "query": {"q": "1"},
+        "json": {"name": "alice"},
     }
 
 
-def test_get_request_data_is_an_explicit_plugin_boundary():
+def test_set_request_data_replaces_missing_context():
+    request = SimpleNamespace(context=None)
+    request_data = RequestData(json={"name": "alice"})
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is request_data
+
+
+def test_set_request_data_replaces_existing_request_data_context():
+    request = SimpleNamespace(
+        context=RequestData(json={"old": True}),
+    )
+    request_data = RequestData(json={"new": True})
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is request_data
+
+
+def test_set_request_data_preserves_framework_context_object():
+    context = SimpleNamespace(
+        keep="value",
+        query="old-query",
+        json="old-json",
+        form="old-form",
+        headers="old-headers",
+        cookies="old-cookies",
+    )
+    request = SimpleNamespace(context=context)
+
+    request_data = RequestData(
+        query={"q": "1"},
+        json=None,
+        form={"field": "value"},
+        headers={"X-Test": "yes"},
+        cookies={"session": "abc"},
+    )
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is context
+    assert context.keep == "value"
+    assert context.query == request_data.query
+    assert context.json is None
+    assert context.form == request_data.form
+    assert context.headers == request_data.headers
+    assert context.cookies == request_data.cookies
+
+
+def test_request_data_is_not_mutated_by_set_request_data():
+    request = SimpleNamespace(context=None)
+    request_data = RequestData(
+        query={"q": "1"},
+        json={"name": "alice"},
+    )
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is request_data
+    assert request_data == RequestData(
+        query={"q": "1"},
+        json={"name": "alice"},
+    )
+
+
+def test_base_plugin_exposes_request_extraction_boundary():
     plugin = make_plugin()
+    endpoint = make_endpoint()
 
     with pytest.raises(NotImplementedError):
-        plugin.get_request_data(SimpleNamespace(), make_endpoint())
+        plugin.get_request_data(SimpleNamespace(), endpoint)

@@ -1,6 +1,6 @@
-import flask
 from typing import Annotated
 
+import flask
 import pytest
 
 pytest.importorskip("msgspec")

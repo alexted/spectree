@@ -1,6 +1,6 @@
-import pytest
 from typing import Annotated, Literal
 
+import pytest
 
 from spectree.model_adapter import ModelSpec
 from spectree.utils import get_model_key, hash_module_path

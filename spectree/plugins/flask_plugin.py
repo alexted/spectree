@@ -26,15 +26,9 @@ class FlaskPlugin(WerkzeugPlugin):
     def get_request_data(self, request, endpoint: EndpointSpec) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
         use_json = (
-            endpoint.json
-            and has_data
-            and request.mimetype not in self.FORM_MIMETYPE
+            endpoint.json and has_data and request.mimetype not in self.FORM_MIMETYPE
         )
-        use_form = (
-            endpoint.form
-            and has_data
-            and request.mimetype in self.FORM_MIMETYPE
-        )
+        use_form = endpoint.form and has_data and request.mimetype in self.FORM_MIMETYPE
         return RequestData(
             query=get_multidict_items(request.args, endpoint.query),
             json=(request.get_json(silent=True) or {}) if use_json else None,
@@ -70,9 +64,7 @@ class FlaskPlugin(WerkzeugPlugin):
                     force_resp_serialize,
                 )
             except self.model_adapter.validation_error as err:
-                response = make_response(
-                    self.model_adapter.validation_errors(err), 500
-                )
+                response = make_response(self.model_adapter.validation_errors(err), 500)
                 resp_validation_error = err
             else:
                 response = make_response(

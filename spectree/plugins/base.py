@@ -39,7 +39,9 @@ class BasePlugin(Generic[BackendRoute]):
     def register_route(self, app: Any):
         raise NotImplementedError
 
-    def validate(self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any):
+    def validate(
+        self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any
+    ):
         raise NotImplementedError
 
     def get_request_data(
