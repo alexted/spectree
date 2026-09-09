@@ -288,16 +288,17 @@ class FalconPlugin(BasePlugin):
         **kwargs: Any,
     ):
         _self, req, resp = args[:3]
-        request_data = self.get_request_data(req, endpoint)
+        request_data = RequestData()
         req_validation_error = None
         if not endpoint.skip_validation:
             try:
+                request_data = self.get_request_data(req, endpoint)
                 request_data = self.validate_request_data(request_data, endpoint)
+                self.set_request_data(req, request_data)
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
                 resp.status = f"{endpoint.validation_error_status} Validation Error"
                 resp.media = self.model_adapter.validation_errors(err)
-        self.set_request_data(req, request_data)
         endpoint.before(
             req,
             resp,
@@ -370,16 +371,17 @@ class FalconAsgiPlugin(FalconPlugin):
         **kwargs: Any,
     ):
         _self, req, resp = args[:3]
-        request_data = await self.get_request_data(req, endpoint)
+        request_data = RequestData()
         req_validation_error = None
         if not endpoint.skip_validation:
             try:
+                request_data = await self.get_request_data(req, endpoint)
                 request_data = self.validate_request_data(request_data, endpoint)
+                self.set_request_data(req, request_data)
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
                 resp.status = f"{endpoint.validation_error_status} Validation Error"
                 resp.media = self.model_adapter.validation_errors(err)
-        self.set_request_data(req, request_data)
         endpoint.before(
             req,
             resp,
