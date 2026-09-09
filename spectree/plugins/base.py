@@ -55,17 +55,14 @@ class BasePlugin(Generic[BackendRoute]):
         endpoint: EndpointSpec,
     ) -> RequestData:
         values: dict[str, Any] = {}
-
         for name in REQUEST_MODEL_ARGUMENTS:
             model = endpoint.model_for(name)
             value = getattr(request_data, name)
-
             values[name] = (
                 self.model_adapter.validate_obj(model, value)
                 if model is not None and value is not None
                 else None
             )
-
         return RequestData(**values)
 
     @staticmethod
@@ -79,11 +76,8 @@ class BasePlugin(Generic[BackendRoute]):
         if isinstance(context, MutableMapping):
             context.update(
                 {
-                    "query": request_data.query,
-                    "json": request_data.json,
-                    "form": request_data.form,
-                    "headers": request_data.headers,
-                    "cookies": request_data.cookies,
+                    name: getattr(request_data, name)
+                    for name in REQUEST_MODEL_ARGUMENTS
                 }
             )
             return
