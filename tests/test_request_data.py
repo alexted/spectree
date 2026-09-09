@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from spectree.endpoint import EndpointSpec
-from spectree.plugins.base import BasePlugin
+from spectree.plugins.base import BasePlugin, Context
 from spectree.request_data import RequestData
 
 
@@ -186,6 +186,23 @@ def test_set_request_data_replaces_missing_context():
 def test_set_request_data_replaces_existing_request_data_context():
     request = SimpleNamespace(
         context=RequestData(json={"old": True}),
+    )
+    request_data = RequestData(json={"new": True})
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is request_data
+
+
+def test_set_request_data_replaces_legacy_context():
+    request = SimpleNamespace(
+        context=Context(
+            query="old-query",
+            json="old-json",
+            form="old-form",
+            headers="old-headers",
+            cookies="old-cookies",
+        )
     )
     request_data = RequestData(json={"new": True})
 
