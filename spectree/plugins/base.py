@@ -56,12 +56,12 @@ class BasePlugin(Generic[BackendRoute]):
     ) -> RequestData:
         values: dict[str, Any] = {}
         for name in REQUEST_MODEL_ARGUMENTS:
-            value = getattr(request_data, name)
             model = endpoint.model_for(name)
+            value = getattr(request_data, name)
             values[name] = (
                 self.model_adapter.validate_obj(model, value)
                 if model is not None and value is not None
-                else value
+                else None
             )
         return RequestData(**values)
 
