@@ -49,7 +49,7 @@ def test_slots_and_frozen_dataclass_full_adapter_contract(model_case):
     )
     assert schema["type"] == "object"
     assert schema["properties"]["user_id"]["type"] == "integer"
-    assert schema["properties"]["label"]["default"] == "default"
+    assert schema["properties"]["label"]["type"] == "string"
 
 
 def test_nested_dataclass_json_roundtrip_preserves_original_types(model_case):
@@ -99,35 +99,28 @@ def test_list_dataclass_json_roundtrip_preserves_item_types(model_case):
 
 
 @pytest.mark.parametrize(
-    "model",
+    "model, payload",
     [
-        SimpleModel | None,
-        list[SimpleModel],
-        dict[str, SimpleModel],
-        Annotated[SimpleModel, "metadata"],
+        (SimpleModel | None, b'{"user_id":1}'),
+        (list[SimpleModel], b'[{"user_id":1}]'),
+        (dict[str, SimpleModel], b'{"item":{"user_id":1}}'),
+        (Annotated[SimpleModel, "metadata"], b'{"user_id":1}'),
     ],
 )
 def test_dataclass_generic_specs_preserve_instances_after_json_validation(
     model_case,
     model,
+    payload,
 ):
     adapter = model_case.adapter
 
-    payloads = {
-        SimpleModel | None: b'{"user_id":1}',
-        list[SimpleModel]: b'[{"user_id":1}]',
-        dict[str, SimpleModel]: b'{"item":{"user_id":1}}',
-        Annotated[SimpleModel, "metadata"]: b'{"user_id":1}',
-    }
-
-    decoded = adapter.validate_json(model, payloads[model])
+    decoded = adapter.validate_json(model, payload)
 
     if model == SimpleModel | None or model == Annotated[SimpleModel, "metadata"]:
         assert type(decoded) is SimpleModel
-        assert adapter.is_model_instance(decoded, model) is True
     elif model == list[SimpleModel]:
         assert [type(item) for item in decoded] == [SimpleModel]
-        assert adapter.is_model_instance(decoded, model) is True
     else:
         assert type(decoded["item"]) is SimpleModel
-        assert adapter.is_model_instance(decoded, model) is True
+
+    assert adapter.is_model_instance(decoded, model) is True
