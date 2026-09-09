@@ -287,3 +287,20 @@ def test_base_plugin_exposes_request_extraction_boundary():
 
     with pytest.raises(NotImplementedError):
         plugin.get_request_data(SimpleNamespace(), endpoint)
+
+
+def test_set_request_data_replaces_legacy_context():
+    request = SimpleNamespace(
+        context=Context(
+            query="old-query",
+            json="old-json",
+            form="old-form",
+            headers="old-headers",
+            cookies="old-cookies",
+        )
+    )
+    request_data = RequestData(json={"new": True})
+
+    BasePlugin.set_request_data(request, request_data)
+
+    assert request.context is request_data

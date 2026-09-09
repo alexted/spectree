@@ -55,22 +55,27 @@ class BasePlugin(Generic[BackendRoute]):
         endpoint: EndpointSpec,
     ) -> RequestData:
         values: dict[str, Any] = {}
+
         for name in REQUEST_MODEL_ARGUMENTS:
             model = endpoint.model_for(name)
             value = getattr(request_data, name)
+
             values[name] = (
                 self.model_adapter.validate_obj(model, value)
                 if model is not None and value is not None
                 else None
             )
+
         return RequestData(**values)
 
     @staticmethod
     def set_request_data(request: Any, request_data: RequestData) -> None:
         context = getattr(request, "context", None)
+
         if context is None or isinstance(context, (Context, RequestData)):
             request.context = request_data
             return
+
         if isinstance(context, MutableMapping):
             context.update(
                 {
@@ -82,6 +87,7 @@ class BasePlugin(Generic[BackendRoute]):
                 }
             )
             return
+
         for name in REQUEST_MODEL_ARGUMENTS:
             setattr(context, name, getattr(request_data, name))
 

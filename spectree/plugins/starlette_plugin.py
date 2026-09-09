@@ -82,9 +82,7 @@ class StarlettePlugin(BasePlugin):
             )
 
     async def get_request_data(
-        self,
-        request: Request,
-        endpoint: EndpointSpec,
+        self, request: Request, endpoint: EndpointSpec
     ) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
         content_type = request.headers.get("content-type", "")
@@ -126,9 +124,11 @@ class StarlettePlugin(BasePlugin):
     ):
         async def call_with_model_adapter() -> Any:
             model_adapter_token = _active_model_adapter.set(self.model_adapter)
+
             try:
                 if inspect.iscoroutinefunction(func):
                     return await func(*args, **kwargs)
+
                 return func(*args, **kwargs)
             finally:
                 _active_model_adapter.reset(model_adapter_token)
@@ -162,7 +162,8 @@ class StarlettePlugin(BasePlugin):
                     extra={"spectree_json_decode_error": str(err)},
                 )
                 response = JSONResponse(
-                    {"error_msg": str(err)}, endpoint.validation_error_status
+                    {"error_msg": str(err)},
+                    endpoint.validation_error_status,
                 )
         else:
             request_data = await self.get_request_data(request, endpoint)
@@ -175,6 +176,7 @@ class StarlettePlugin(BasePlugin):
             instance,
             self.model_adapter,
         )
+
         if req_validation_error or json_decode_error:
             return response
 
@@ -300,3 +302,40 @@ class StarlettePlugin(BasePlugin):
                 }
             )
         return path, parameters
+
+    async def get_request_data(
+        self,
+        request: Request,
+        endpoint: EndpointSpec,
+    ) -> RequestData:
+        has_data = request.method not in ("GET", "DELETE")
+
+        content_type = request.headers.get("content-type", "")
+        media_type = content_type.split(";", 1)[0].strip().lower()
+
+        use_json = endpoint.json and has_data and media_type == "application/json"
+        use_form = endpoint.form and has_data and media_type in self.FORM_MIMETYPE
+
+        req_json = None
+        if use_json:
+            req_json = await request.json()
+            if req_json is None:
+                req_json = {}
+
+        req_form = None
+        if use_form:
+            req_form = get_multidict_items_starlette(
+                await request.form(),
+                endpoint.form,
+            )
+
+        return RequestData(
+            query=get_multidict_items_starlette(
+                request.query_params,
+                endpoint.query,
+            ),
+            json=req_json,
+            form=req_form,
+            headers=dict(request.headers),
+            cookies=dict(request.cookies),
+        )
