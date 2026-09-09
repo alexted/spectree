@@ -122,7 +122,7 @@ def test_dataclass_generic_specs_preserve_instances_after_json_validation(
 
     decoded = adapter.validate_json(model, payloads[model])
 
-    if model is SimpleModel | None or model == Annotated[SimpleModel, "metadata"]:
+    if model == SimpleModel | None or model == Annotated[SimpleModel, "metadata"]:
         assert type(decoded) is SimpleModel
         assert adapter.is_model_instance(decoded, model) is True
     elif model == list[SimpleModel]:
