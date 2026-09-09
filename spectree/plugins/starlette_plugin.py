@@ -2,9 +2,11 @@ import inspect
 from collections import namedtuple
 from contextvars import ContextVar
 from functools import partial
-from typing import Any
+from json import JSONDecodeError
+from typing import Any, Callable
 
 from starlette.convertors import CONVERTOR_TYPES
+from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import compile_path
 
@@ -13,6 +15,8 @@ from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import (
     BasePlugin,
+    RawResponsePayload,
+    validate_response,
 )
 from spectree.request_data import RequestData
 from spectree.utils import get_multidict_items_starlette
@@ -78,7 +82,9 @@ class StarlettePlugin(BasePlugin):
             )
 
     async def get_request_data(
-        self, request: Request, endpoint: EndpointSpec
+        self,
+        request: Request,
+        endpoint: EndpointSpec,
     ) -> RequestData:
         has_data = request.method not in ("GET", "DELETE")
         content_type = request.headers.get("content-type", "")
@@ -89,7 +95,10 @@ class StarlettePlugin(BasePlugin):
 
         req_json = None
         if use_json:
-            req_json = await request.json()
+            try:
+                req_json = await request.json()
+            except JSONDecodeError:
+                raise
             if req_json is None:
                 req_json = {}
 
@@ -111,35 +120,112 @@ class StarlettePlugin(BasePlugin):
             cookies=dict(request.cookies),
         )
 
-    def validate(
+    async def validate(
         self,
-        request,
+        func: Callable,
         endpoint: EndpointSpec,
-        kwargs: dict,
+        *args: Any,
+        **kwargs: Any,
     ):
-        request_data = RequestData()
+        async def call_with_model_adapter() -> Any:
+            model_adapter_token = _active_model_adapter.set(self.model_adapter)
+            try:
+                if inspect.iscoroutinefunction(func):
+                    return await func(*args, **kwargs)
+                return func(*args, **kwargs)
+            finally:
+                _active_model_adapter.reset(model_adapter_token)
+
+        if isinstance(args[0], Request):
+            instance, request = None, args[0]
+        else:
+            instance, request = args[:2]
+
+        response = None
         req_validation_error = None
+        resp_validation_error = None
+        json_decode_error = None
 
         if not endpoint.skip_validation:
             try:
-                request_data = await self._get_and_validate_request_data(
-                    request,
-                    endpoint,
-                )
+                request_data = await self.get_request_data(request, endpoint)
+                request_data = self.validate_request_data(request_data, endpoint)
                 self.set_request_data(request, request_data)
-            except self.model_adapter.validation_error as exc:
-                req_validation_error = exc
+            except self.model_adapter.validation_error as err:
+                req_validation_error = err
+                response = JSONResponse(
+                    self.model_adapter.validation_errors(err),
+                    endpoint.validation_error_status,
+                )
+            except JSONDecodeError as err:
+                json_decode_error = err
+                self.logger.info(
+                    "%s Validation Error",
+                    endpoint.validation_error_status,
+                    extra={"spectree_json_decode_error": str(err)},
+                )
+                response = JSONResponse(
+                    {"error_msg": str(err)}, endpoint.validation_error_status
+                )
+        else:
+            request_data = await self.get_request_data(request, endpoint)
+            self.set_request_data(request, request_data)
+
+        endpoint.before(
+            request,
+            response,
+            req_validation_error,
+            instance,
+            self.model_adapter,
+        )
+        if req_validation_error or json_decode_error:
+            return response
 
         self.inject_request_data(request_data, endpoint, kwargs)
 
-        if req_validation_error is not None:
-            return self.on_validation_error(
-                request,
-                endpoint,
-                req_validation_error,
-            )
+        response = await call_with_model_adapter()
 
-        return None
+        if (
+            not endpoint.skip_validation
+            and endpoint.response
+            and response
+            and not (
+                isinstance(response, JSONResponse)
+                and hasattr(response, "_model_class")
+                and response._model_class
+                == endpoint.response.find_model(response.status_code)
+            )
+        ):
+            try:
+                response_validation_result = validate_response(
+                    model_adapter=self.model_adapter,
+                    validation_model=endpoint.response.find_model(
+                        response.status_code,
+                    ),
+                    response_payload=RawResponsePayload(
+                        payload=response.body,
+                    ),
+                    force_serialize=endpoint.force_resp_serialize,
+                )
+            except self.model_adapter.validation_error as err:
+                response = JSONResponse(
+                    self.model_adapter.validation_errors(err),
+                    500,
+                )
+                resp_validation_error = err
+            else:
+                if isinstance(response_validation_result.payload, bytes):
+                    response.body = response_validation_result.payload
+
+        endpoint.after(
+            request,
+            response,
+            resp_validation_error,
+            instance,
+            self.model_adapter,
+        )
+
+        return response
 
     def find_routes(self):
         routes = []
@@ -217,40 +303,3 @@ class StarlettePlugin(BasePlugin):
                 }
             )
         return path, parameters
-
-    async def get_request_data(
-        self,
-        request,
-        endpoint: EndpointSpec,
-    ) -> RequestData:
-        has_data = request.method not in ("GET", "DELETE")
-
-        content_type = request.headers.get("content-type", "")
-        media_type = content_type.split(";", 1)[0].strip().lower()
-
-        use_json = endpoint.json and has_data and media_type == "application/json"
-        use_form = endpoint.form and has_data and media_type in self.FORM_MIMETYPE
-
-        req_form = None
-        if use_form:
-            req_form = get_multidict_items_starlette(
-                await request.form(),
-                endpoint.form,
-            )
-
-        req_json = None
-        if use_json:
-            req_json = await request.json()
-            if req_json is None:
-                req_json = {}
-
-        return RequestData(
-            query=get_multidict_items_starlette(
-                request.query_params,
-                endpoint.query,
-            ),
-            json=req_json,
-            form=req_form,
-            headers=dict(request.headers),
-            cookies=dict(request.cookies),
-        )
