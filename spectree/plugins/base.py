@@ -68,7 +68,7 @@ class BasePlugin(Generic[BackendRoute]):
     @staticmethod
     def set_request_data(request: Any, request_data: RequestData) -> None:
         context = getattr(request, "context", None)
-        if context is None or isinstance(context, RequestData):
+        if context is None or isinstance(context, (Context, RequestData)):
             request.context = request_data
             return
         if isinstance(context, MutableMapping):
