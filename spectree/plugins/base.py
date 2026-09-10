@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -9,14 +9,13 @@ from typing import (
     Optional,
     TypeVar,
 )
-
 from spectree._types import JsonType, ModelAdapterType
 from spectree.config import Configuration
+from spectree.request_data import RequestData
 from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 
 if TYPE_CHECKING:
-    # to avoid cyclic import
     from spectree.spec import SpecTree
 
 
@@ -32,13 +31,8 @@ BackendRoute = TypeVar("BackendRoute")
 
 
 class BasePlugin(Generic[BackendRoute]):
-    """
-    Base plugin for SpecTree plugin classes.
+    """Base plugin for SpecTree plugin classes."""
 
-    :param spectree: :class:`spectree.SpecTree` instance
-    """
-
-    # ASYNC: is it an async framework or not
     ASYNC = False
     FORM_MIMETYPE = ("application/x-www-form-urlencoded", "multipart/form-data")
 
@@ -49,14 +43,19 @@ class BasePlugin(Generic[BackendRoute]):
         self.logger = logging.getLogger(__name__)
 
     def register_route(self, app: Any):
-        """
-        :param app: backend framework application
-
-        register document API routes to application
-        """
         raise NotImplementedError
 
     def validate(
+        self, func: Callable, endpoint: EndpointSpec, *args: Any, **kwargs: Any
+    ):
+        raise NotImplementedError
+
+    def get_request_data(
+        self, request: Any, endpoint: EndpointSpec
+    ) -> RequestData | Awaitable[RequestData]:
+        raise NotImplementedError
+
+    def validate_request_data(
         self,
         func: Callable,
         endpoint: EndpointSpec,
@@ -70,48 +69,20 @@ class BasePlugin(Generic[BackendRoute]):
         raise NotImplementedError
 
     def find_routes(self) -> BackendRoute:
-        """
-        find the routes from application
-        """
         raise NotImplementedError
 
     def bypass(self, func: Callable, method: str) -> bool:
-        """
-        :param func: route function (endpoint)
-        :param method: HTTP method for this route function
-
-        bypass some routes that shouldn't be shown in document
-        """
         raise NotImplementedError
 
     def parse_path(
         self, route: Any, path_parameter_descriptions: Mapping[str, str] | None
     ):
-        """
-        :param route: API routes
-        :param path_parameter_descriptions: A dictionary of path parameter names and
-            their description.
-
-        parse URI path to get the variables in path
-        """
         raise NotImplementedError
 
     def parse_func(self, route: BackendRoute):
-        """
-        :param route: API routes
-
-        get the endpoint function from routes
-        """
         raise NotImplementedError
 
     def get_func_operation_id(self, func: Callable, path: str, method: str):
-        """
-        :param func: route function (endpoint)
-        :param method: URI path for this route function
-        :param method: HTTP method for this route function
-
-        get the operation_id value for the endpoint
-        """
         operation_id = getattr(func, "operation_id", None)
         if not operation_id:
             operation_id = f"{method.lower()}_{path.replace('/', '_')}"
@@ -147,7 +118,7 @@ def validate_response(
     if validation_model is None:
         return ResponseValidationResult(payload=response_payload)
 
-    final_response_payload: Any = None
+    final_response_payload: Any
     skip_validation = False
     if isinstance(response_payload, RawResponsePayload):
         final_response_payload = response_payload.payload
@@ -155,7 +126,6 @@ def validate_response(
         skip_validation = True
         final_response_payload = model_adapter.dump_json(response_payload)
     else:
-        # non-model response or partial model instance response
         final_response_payload = response_payload
 
     if not skip_validation:
@@ -167,10 +137,6 @@ def validate_response(
             validated_instance = model_adapter.validate_obj(
                 validation_model, final_response_payload
             )
-        # in case the response model contains (alias, default_none, unset fields) which
-        # might not be what the users want, we only return the validated payload when
-        # the response contains a partial model instance or the user explicitly sets
-        # `force_serialize`
         if force_serialize or model_adapter.is_partial_model_instance(
             final_response_payload
         ):
