@@ -1,11 +1,17 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, NamedTuple, Optional, TypeVar
-
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    NamedTuple,
+    Optional,
+    TypeVar,
+)
 from spectree._types import JsonType, ModelAdapterType
 from spectree.config import Configuration
-from spectree.endpoint import REQUEST_MODEL_ARGUMENTS, EndpointSpec
+from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 from spectree.request_data import RequestData
 
@@ -51,48 +57,16 @@ class BasePlugin(Generic[BackendRoute]):
 
     def validate_request_data(
         self,
-        request_data: RequestData,
+        func: Callable,
         endpoint: EndpointSpec,
-    ) -> RequestData:
-        values: dict[str, Any] = {}
-        for name in REQUEST_MODEL_ARGUMENTS:
-            model = endpoint.model_for(name)
-            value = getattr(request_data, name)
-            values[name] = (
-                self.model_adapter.validate_obj(model, value)
-                if model is not None and value is not None
-                else None
-            )
-        return RequestData(**values)
-
-    @staticmethod
-    def set_request_data(request: Any, request_data: RequestData) -> None:
-        context = getattr(request, "context", None)
-
-        if context is None or isinstance(context, (Context, RequestData)):
-            request.context = request_data
-            return
-
-        if isinstance(context, MutableMapping):
-            context.update(
-                {
-                    name: getattr(request_data, name)
-                    for name in REQUEST_MODEL_ARGUMENTS
-                }
-            )
-            return
-
-        for name in REQUEST_MODEL_ARGUMENTS:
-            setattr(context, name, getattr(request_data, name))
-
-    @staticmethod
-    def inject_request_data(
-        request_data: RequestData,
-        endpoint: EndpointSpec,
-        kwargs: dict[str, Any],
-    ) -> None:
-        for name in endpoint.injected_arguments:
-            kwargs[name] = getattr(request_data, name)
+        *args: Any,
+        **kwargs: Any,
+    ):
+        """
+        Validate request/response and invoke the endpoint using
+        the precomputed endpoint contract.
+        """
+        raise NotImplementedError
 
     def find_routes(self) -> BackendRoute:
         raise NotImplementedError
@@ -131,6 +105,16 @@ def validate_response(
     response_payload: Any,
     force_serialize: bool = False,
 ) -> ResponseValidationResult:
+    """Validate a given ``response_payload`` against a ``validation_model``.
+    This does nothing if ``validation_model is None``.
+
+    :param validation_model: model class used to validate the provided
+        ``response_payload``.
+    :param response_payload: Validated response payload. A :class:`RawResponsePayload`
+        should be provided when the plugin view function returned an already
+        JSON-serialized response payload.
+    :param force_serialize: Always serialize the validation model instance.
+    """
     if validation_model is None:
         return ResponseValidationResult(payload=response_payload)
 

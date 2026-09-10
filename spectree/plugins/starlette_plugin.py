@@ -15,16 +15,17 @@ from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
 from spectree.plugins.base import (
     BasePlugin,
+    Context,
     RawResponsePayload,
     validate_response,
 )
-from spectree.request_data import RequestData
 from spectree.utils import get_multidict_items_starlette
 
 METHODS = {"get", "post", "put", "patch", "delete"}
 Route = namedtuple("Route", ["path", "methods", "func"])
 _active_model_adapter: ContextVar[ModelAdapterType | None] = ContextVar(
-    "spectree_starlette_model_adapter", default=None
+    "spectree_starlette_model_adapter",
+    default=None,
 )
 _response_models: dict[object, ModelSpec] = {}
 
@@ -62,6 +63,7 @@ class StarlettePlugin(BasePlugin):
 
     def __init__(self, spectree):
         super().__init__(spectree)
+
         self.conv2type = {conv: typ for typ, conv in CONVERTOR_TYPES.items()}
 
     def register_route(self, app):
@@ -69,6 +71,7 @@ class StarlettePlugin(BasePlugin):
             self.config.spec_url,
             lambda request: JSONResponse(self.spectree.spec),
         )
+
         for ui in self.config.page_templates:
             app.add_route(
                 f"/{self.config.path}/{ui}",
@@ -81,40 +84,31 @@ class StarlettePlugin(BasePlugin):
                 ),
             )
 
-    async def get_request_data(
-        self,
-        request: Request,
-        endpoint: EndpointSpec,
-    ) -> RequestData:
+    async def request_validation(self, request, query, json, form, headers, cookies):
         has_data = request.method not in ("GET", "DELETE")
-        content_type = request.headers.get("content-type", "")
-        media_type = content_type.split(";", 1)[0].strip().lower()
-
-        use_json = endpoint.json and has_data and media_type == "application/json"
-        use_form = endpoint.form and has_data and media_type in self.FORM_MIMETYPE
-
-        req_json = None
-        if use_json:
-            req_json = await request.json()
-            if req_json is None:
-                req_json = {}
-
-        req_form = None
-        if use_form:
-            req_form = get_multidict_items_starlette(
-                await request.form(),
-                endpoint.form,
+        content_type = request.headers.get("content-type", "").lower()
+        use_json = json and has_data and content_type == "application/json"
+        use_form = (
+            form and has_data and any([x in content_type for x in self.FORM_MIMETYPE])
+        )
+        request.context = Context(
+            self.model_adapter.validate_obj(
+                query, get_multidict_items_starlette(request.query_params, query)
             )
-
-        return RequestData(
-            query=get_multidict_items_starlette(
-                request.query_params,
-                endpoint.query,
-            ),
-            json=req_json,
-            form=req_form,
-            headers=dict(request.headers),
-            cookies=dict(request.cookies),
+            if query
+            else None,
+            self.model_adapter.validate_obj(json, await request.json() or {})
+            if use_json
+            else None,
+            self.model_adapter.validate_obj(form, await request.form() or {})
+            if use_form
+            else None,
+            self.model_adapter.validate_obj(headers, request.headers)
+            if headers
+            else None,
+            self.model_adapter.validate_obj(cookies, request.cookies)
+            if cookies
+            else None,
         )
 
     async def validate(
@@ -142,13 +136,17 @@ class StarlettePlugin(BasePlugin):
         req_validation_error = None
         resp_validation_error = None
         json_decode_error = None
-        request_data = RequestData()
 
         if not endpoint.skip_validation:
             try:
-                request_data = await self.get_request_data(request, endpoint)
-                request_data = self.validate_request_data(request_data, endpoint)
-                self.set_request_data(request, request_data)
+                await self.request_validation(
+                    request,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
+                )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
                 response = JSONResponse(
@@ -174,10 +172,16 @@ class StarlettePlugin(BasePlugin):
             instance,
             self.model_adapter,
         )
+
         if req_validation_error or json_decode_error:
             return response
 
-        self.inject_request_data(request_data, endpoint, kwargs)
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                getattr(request, "context", None),
+                name,
+                None,
+            )
 
         response = await call_with_model_adapter()
 
@@ -210,7 +214,10 @@ class StarlettePlugin(BasePlugin):
                 )
                 resp_validation_error = err
             else:
-                if isinstance(response_validation_result.payload, bytes):
+                if isinstance(
+                    response_validation_result.payload,
+                    bytes,
+                ):
                     response.body = response_validation_result.payload
 
         endpoint.after(
@@ -227,21 +234,22 @@ class StarlettePlugin(BasePlugin):
         routes = []
 
         def parse_route(app, prefix=""):
+            # :class:`starlette.staticfiles.StaticFiles` doesn't have routes
             if not app.routes:
                 return
             for route in app.routes:
                 if route.path.startswith(f"/{self.config.path}"):
                     continue
+
                 func = route.app
                 if isinstance(func, partial):
                     try:
                         func = func.__wrapped__
                     except AttributeError as err:
                         self.logger.warning(
-                            "failed to get the wrapped func %s: %s",
-                            func,
-                            err,
+                            "failed to get the wrapped func %s: %s", func, err
                         )
+
                 if inspect.isclass(func):
                     for method in METHODS:
                         if getattr(func, method, None):
@@ -272,18 +280,25 @@ class StarlettePlugin(BasePlugin):
     def parse_path(self, route, path_parameter_descriptions):
         _, path, variables = compile_path(route.path)
         parameters = []
+
         for name, conv in variables.items():
+            schema = None
             typ = self.conv2type[conv]
             if typ == "int":
                 schema = {"type": "integer", "format": "int32"}
             elif typ == "float":
-                schema = {"type": "number", "format": "float"}
+                schema = {
+                    "type": "number",
+                    "format": "float",
+                }
             elif typ == "path":
-                schema = {"type": "string", "format": "path"}
+                schema = {
+                    "type": "string",
+                    "format": "path",
+                }
             elif typ == "str":
                 schema = {"type": "string"}
-            else:
-                schema = None
+
             description = (
                 path_parameter_descriptions.get(name, "")
                 if path_parameter_descriptions
@@ -298,4 +313,5 @@ class StarlettePlugin(BasePlugin):
                     "description": description,
                 }
             )
+
         return path, parameters
