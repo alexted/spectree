@@ -1,3 +1,5 @@
+from typing import Annotated
+
 import flask
 import pytest
 
@@ -233,3 +235,153 @@ def test_msgspec_generic_schema_with_stable_model_key():
     ]["schema"] == {"$ref": f"#/components/schemas/{root_model_key}"}
     assert schemas[list_model_key]["type"] == "array"
     assert schemas[root_model_key]["title"] == "Users"
+
+
+class DemoStruct(msgspec.Struct):
+    value: int
+
+
+def test_msgspec_model_spec_type_expressions():
+    assert ADAPTER.is_model_type(DemoStruct)
+    assert ADAPTER.is_model_type(list[DemoStruct])
+    assert ADAPTER.is_model_type(dict[str, DemoStruct])
+    assert ADAPTER.is_model_type(DemoStruct | None)
+
+
+def test_msgspec_annotated_model_spec():
+    model = Annotated[
+        DemoStruct,
+        msgspec.Meta(title="Demo"),
+    ]
+
+    assert ADAPTER.is_model_type(model)
+
+    value = ADAPTER.validate_obj(
+        model,
+        {"value": 1},
+    )
+
+    assert value == DemoStruct(value=1)
+
+    assert ADAPTER.is_model_instance(
+        value,
+        model,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        {"value": 1},
+        model,
+    )
+
+
+def test_msgspec_generic_model_instance_detection():
+    spec = list[SimpleModel]
+
+    value = [
+        SimpleModel(user_id=1),
+        SimpleModel(user_id=2),
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {"user_id": 1},
+        ],
+        spec,
+    )
+
+
+def test_msgspec_nested_generic_model_instance_detection():
+    spec = list[dict[str, SimpleModel]]
+
+    value = [
+        {
+            "first": SimpleModel(user_id=1),
+            "second": SimpleModel(user_id=2),
+        }
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {
+                "first": {"user_id": 1},
+            }
+        ],
+        spec,
+    )
+
+
+def test_msgspec_invalid_model_type_is_rejected():
+    class Unsupported:
+        pass
+
+    assert ADAPTER.is_model_type(Unsupported) is False
+    assert ADAPTER.is_model_type(Unsupported()) is False
+
+
+def test_msgspec_annotated_generic_model_instance_detection():
+    spec = Annotated[
+        list[SimpleModel],
+        "metadata",
+    ]
+
+    value = [
+        SimpleModel(user_id=1),
+        SimpleModel(user_id=2),
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {"user_id": 1},
+        ],
+        spec,
+    )
+
+
+def test_msgspec_rejects_unsupported_nested_generic():
+    class Unsupported:
+        value: int
+
+    assert ADAPTER.is_model_type(list[Unsupported]) is False
+
+
+def test_msgspec_annotated_nested_generic_model_instance():
+    spec = Annotated[
+        list[dict[str, SimpleModel]],
+        "metadata",
+    ]
+
+    value = [
+        {
+            "first": SimpleModel(user_id=1),
+            "second": SimpleModel(user_id=2),
+        }
+    ]
+
+    assert ADAPTER.is_model_instance(
+        value,
+        spec,
+    )
+
+    assert not ADAPTER.is_model_instance(
+        [
+            {
+                "first": {"user_id": 1},
+            }
+        ],
+        spec,
+    )

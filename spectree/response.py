@@ -2,10 +2,10 @@ import sys
 from collections.abc import Iterable
 from copy import copy
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, Optional, TypeAlias, get_args, get_origin
 
 from spectree._types import ModelAdapterType, NamingStrategy
-from spectree.model_adapter import ModelClass
+from spectree.model_adapter import ModelSpec
 from spectree.utils import get_model_key, parse_code
 
 # according to https://tools.ietf.org/html/rfc2616#section-10
@@ -17,7 +17,7 @@ DEFAULT_CODE_DESC: dict[str, str] = dict(
 
 # Python's typing cannot precisely express runtime type expressions such as
 # `list[User]` here without relying on non-portable internals.
-ResponseModelSpec: TypeAlias = object
+ResponseModelSpec: TypeAlias = ModelSpec
 ResponseModelConfig: TypeAlias = (
     ResponseModelSpec | tuple[ResponseModelSpec | None, str] | None
 )
@@ -42,9 +42,9 @@ class Response:
     :py:meth:`SpecTree.validate<spectree.spec.SpecTree.validate>` method.
 
     :param codes: list of HTTP status code, format('HTTP_[0-9]{3}'), 'HTTP_200'
-    :param code_models: dict of <HTTP status code>: <model class> or None or
-        a two element tuple of (<model class> or None) as the first item and
-        a custom status code description string as the second item.
+    :param code_models: mapping of HTTP status code to a supported model
+        specification, None, or a two-element tuple containing a model
+        specification and a custom status-code description.
 
     examples:
 
@@ -70,7 +70,7 @@ class Response:
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             self.codes.append(code)
 
-        self.code_models: dict[str, ModelClass] = {}
+        self.code_models: dict[str, ModelSpec] = {}
         self.code_descriptions: dict[str, str | None] = {}
         self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
@@ -94,7 +94,7 @@ class Response:
             else:
                 self.codes.append(code)
 
-            if description:
+            if description is not None:
                 self.code_descriptions[code] = description
 
     def copy_for_model_adapter(
@@ -128,17 +128,28 @@ class Response:
         self.code_models = self._build_models(model_adapter)
 
     def _build_model(
-        self, raw_model: Any, model_adapter: ModelAdapterType
-    ) -> ModelClass:
-        model = raw_model
-        origin_type = getattr(model, "__origin__", None)
+        self,
+        raw_model: ModelSpec,
+        model_adapter: ModelAdapterType,
+    ) -> ModelSpec:
+        origin_type = get_origin(raw_model)
+
         if origin_type is list:
-            model = model_adapter.make_list_model(model.__args__[0])  # type: ignore
+            args = get_args(raw_model)
+
+            if len(args) != 1:
+                raise AssertionError(f"invalid response model: {raw_model}")
+
+            model = model_adapter.make_list_model(args[0])
+        else:
+            model = raw_model
+
         assert model_adapter.is_model_type(model), f"invalid response model: {model}"
+
         return model
 
-    def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelClass]:
-        code_models: dict[str, ModelClass] = {}
+    def _build_models(self, model_adapter: ModelAdapterType) -> dict[str, ModelSpec]:
+        code_models: dict[str, ModelSpec] = {}
         for code, raw_model in self._raw_code_models.items():
             code_models[code] = self._build_model(raw_model, model_adapter)
         return code_models
@@ -180,7 +191,7 @@ class Response:
         """
         return bool(self.code_models)
 
-    def find_model(self, code: int) -> ModelClass | None:
+    def find_model(self, code: int) -> Optional[ModelSpec]:
         """
         :param code: ``r'\\d{3}'``
         """
@@ -195,7 +206,7 @@ class Response:
         return self.code_descriptions.get(code) or DEFAULT_CODE_DESC[code]
 
     @property
-    def models(self) -> Iterable[ModelClass]:
+    def models(self) -> Iterable[ModelSpec]:
         """
         :returns:  dict_values -- all the models in this response
         """

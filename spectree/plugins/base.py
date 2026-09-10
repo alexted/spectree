@@ -6,12 +6,13 @@ from typing import (
     Any,
     Generic,
     NamedTuple,
+    Optional,
     TypeVar,
 )
 
 from spectree._types import HookHandler, JsonType, ModelAdapterType
 from spectree.config import Configuration
-from spectree.model_adapter import ModelClass
+from spectree.model_adapter import ModelSpec
 from spectree.response import Response
 
 if TYPE_CHECKING:
@@ -58,12 +59,12 @@ class BasePlugin(Generic[BackendRoute]):
     def validate(
         self,
         func: Callable,
-        query: ModelClass | None,
-        json: ModelClass | None,
-        form: ModelClass | None,
-        headers: ModelClass | None,
-        cookies: ModelClass | None,
-        resp: Response | None,
+        query: Optional[ModelSpec],
+        json: Optional[ModelSpec],
+        form: Optional[ModelSpec],
+        headers: Optional[ModelSpec],
+        cookies: Optional[ModelSpec],
+        resp: Optional[Response],
         before: HookHandler,
         after: HookHandler,
         validation_error_status: int,
@@ -138,7 +139,7 @@ class ResponseValidationResult:
 
 def validate_response(
     model_adapter: ModelAdapterType,
-    validation_model: ModelClass | None,
+    validation_model: Optional[ModelSpec],
     response_payload: Any,
     force_serialize: bool = False,
 ) -> ResponseValidationResult:
@@ -152,7 +153,7 @@ def validate_response(
         JSON-serialized response payload.
     :param force_serialize: Always serialize the validation model instance.
     """
-    if not validation_model:
+    if validation_model is None:
         return ResponseValidationResult(payload=response_payload)
 
     final_response_payload: Any = None

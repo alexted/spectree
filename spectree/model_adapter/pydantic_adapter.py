@@ -1,12 +1,24 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
+from functools import cache
 from typing import Any
 
-from pydantic import BaseModel, RootModel, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    PydanticUserError,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+)
 from pydantic_core import core_schema
 
-from spectree.model_adapter.protocol import ModelAdapter, SchemaMode
+from spectree.model_adapter.protocol import (
+    ModelAdapter,
+    ModelSpec,
+    SchemaMode,
+)
 from spectree.models import ValidationErrorElement
+from spectree.utils import get_model_key
 
 
 class ValidationErrorType(RootModel[Sequence[ValidationErrorElement]]):
@@ -20,115 +32,212 @@ class BaseFile:
     """
 
     @classmethod
-    def __get_pydantic_json_schema__(cls, _core_schema: Mapping[str, Any], _handler):
-        return {"format": "binary", "type": "string"}
+    def __get_pydantic_json_schema__(
+        cls,
+        _core_schema: Mapping[str, Any],
+        _handler,
+    ):
+        return {
+            "format": "binary",
+            "type": "string",
+        }
 
     @classmethod
-    def __get_pydantic_core_schema__(cls, _source_type, _handler):
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type,
+        _handler,
+    ):
         return core_schema.with_info_plain_validator_function(cls.validate)
 
     @classmethod
-    def validate(cls, value: Any, *_args, **_kwargs):
+    def validate(
+        cls,
+        value: Any,
+        *_args,
+        **_kwargs,
+    ):
         return value
 
 
 class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
-    """`pydantic` model adapter."""
+    """Pydantic model adapter."""
 
     validation_error = ValidationError
     basefile = BaseFile
 
-    def __init__(self) -> None:
-        self._type_adapters: dict[type[Any], TypeAdapter[Any]] = {}
+    @staticmethod
+    @cache
+    def _cached_type_adapter(
+        model: ModelSpec,
+    ) -> TypeAdapter[Any]:
+        return TypeAdapter(model)
 
-    def _type_adapter(self, value: type[Any]) -> TypeAdapter[Any]:
-        adapter = self._type_adapters.get(value)
-        if adapter is None:
-            adapter = TypeAdapter(value)
-            self._type_adapters[value] = adapter
-        return adapter
+    @staticmethod
+    def _type_adapter(
+        model: ModelSpec,
+    ) -> TypeAdapter[Any]:
+        try:
+            hash(model)
+        except TypeError:
+            return TypeAdapter(model)
 
-    def is_model_type(self, value: type) -> bool:
-        return (
-            value is ValidationError
-            or issubclass(value, BaseModel)
-            or is_dataclass(value)
-        )
+        return PydanticModelAdapter._cached_type_adapter(model)
 
-    def is_model_instance(self, value: Any, model) -> bool:
-        return isinstance(value, model) and (
-            issubclass(model, BaseModel) or is_dataclass(model)
-        )
+    @staticmethod
+    def _is_base_model_type(
+        model: ModelSpec,
+    ) -> bool:
+        return isinstance(model, type) and issubclass(model, BaseModel)
 
-    def is_partial_model_instance(self, value: Any) -> bool:
+    def is_model_type(
+        self,
+        value: ModelSpec,
+    ) -> bool:
+        if value is ValidationError:
+            return True
+
+        try:
+            self._type_adapter(value)
+        except (
+            PydanticUserError,
+            TypeError,
+            ValueError,
+        ):
+            return False
+
+        return True
+
+    def is_model_instance(
+        self,
+        value: Any,
+        model: ModelSpec,
+    ) -> bool:
+        if self._is_base_model_type(model):
+            return isinstance(value, model)
+
+        try:
+            self._type_adapter(model).validate_python(
+                value,
+                strict=True,
+            )
+        except (ValidationError, TypeError, ValueError):
+            return False
+
+        return True
+
+    def is_partial_model_instance(
+        self,
+        value: Any,
+    ) -> bool:
         if not value:
             return False
+
         if isinstance(value, BaseModel):
             return True
+
         if is_dataclass(value):
             return True
+
         if isinstance(value, dict):
             return any(
                 self.is_partial_model_instance(key)
                 or self.is_partial_model_instance(item)
                 for key, item in value.items()
             )
+
         if isinstance(value, (list, tuple)):
             return any(self.is_partial_model_instance(item) for item in value)
+
         return False
 
-    def validate_obj(self, model: type[Any], value: Any) -> Any:
-        if issubclass(model, BaseModel):
+    def validate_obj(
+        self,
+        model: ModelSpec,
+        value: Any,
+    ) -> Any:
+        if self._is_base_model_type(model):
             return model.model_validate(value)
+
         return self._type_adapter(model).validate_python(value)
 
-    def validate_json(self, model: type[Any], value: bytes) -> Any:
-        if issubclass(model, BaseModel):
+    def validate_json(
+        self,
+        model: ModelSpec,
+        value: bytes,
+    ) -> Any:
+        if self._is_base_model_type(model):
             return model.model_validate_json(value)
+
         return self._type_adapter(model).validate_json(value)
 
-    def dump_json(self, value: Any) -> bytes:
-        instance = value
-        if not isinstance(value, BaseModel):
-            instance = self.validate_obj(type(instance), instance)
-        if isinstance(instance, BaseModel):
-            return instance.model_dump_json().encode("utf-8")
-        return self._type_adapter(type(instance)).dump_json(instance)
+    def dump_json(
+        self,
+        value: Any,
+    ) -> bytes:
+        if isinstance(value, BaseModel):
+            return value.model_dump_json().encode("utf-8")
+
+        return self._type_adapter(type(value)).dump_json(value)
 
     def make_root_model(
         self,
-        root_type: Any,
+        root_type: ModelSpec,
         *,
         name: str | None = None,
         module: str | None = None,
-    ) -> type[BaseModel]:
+    ) -> ModelSpec:
         model_name = name or "GeneratedRootModel"
         module_name = module or __name__
-        return type(model_name, (RootModel[root_type],), {"__module__": module_name})
 
-    def make_list_model(self, model: type[Any]) -> type[BaseModel]:
+        return type(
+            model_name,
+            (RootModel[root_type],),
+            {"__module__": module_name},
+        )
+
+    def make_list_model(
+        self,
+        model: ModelSpec,
+    ) -> ModelSpec:
+        model_name = _model_name_for_generated_type(model)
+
         return self.make_root_model(
             list[model],  # type: ignore[valid-type]
-            name=f"{model.__name__}List",
-            module=model.__module__,
+            name=f"{model_name}List",
+            module=getattr(model, "__module__", __name__),
         )
 
     def json_schema(
         self,
-        model: type[Any],
+        model: ModelSpec,
         *,
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        if issubclass(model, BaseModel):
-            return model.model_json_schema(ref_template=ref_template, mode=mode)
-        elif model is ValidationError:
-            return ValidationErrorType.model_json_schema(
-                ref_template=ref_template, mode=mode
+        if self._is_base_model_type(model):
+            return model.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
             )
+
+        if model is ValidationError:
+            return ValidationErrorType.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
+            )
+
         return self._type_adapter(model).json_schema(
-            ref_template=ref_template, mode=mode
+            ref_template=ref_template,
+            mode=mode,
         )
 
-    def validation_errors(self, err: ValidationError) -> Any:
+    def validation_errors(
+        self,
+        err: ValidationError,
+    ) -> Any:
         return err.errors(include_context=False)
+
+
+def _model_name_for_generated_type(model: ModelSpec) -> str:
+    return get_model_key(model).split(".", 1)[0]
