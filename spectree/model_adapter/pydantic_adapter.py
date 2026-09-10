@@ -1,7 +1,8 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
 from functools import cache
-from typing import Any
+from types import UnionType
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import (
     BaseModel,
@@ -36,7 +37,7 @@ class BaseFile:
         cls,
         _core_schema: Mapping[str, Any],
         _handler,
-    ):
+    ) -> dict[str, str]:
         return {
             "format": "binary",
             "type": "string",
@@ -56,15 +57,228 @@ class BaseFile:
         value: Any,
         *_args,
         **_kwargs,
-    ):
+    ) -> Any:
         return value
 
 
-class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
+def _unwrap_annotated(model: ModelSpec) -> ModelSpec:
+    while get_origin(model) is Annotated:
+        model = get_args(model)[0]
+    return model
+
+
+def _is_base_model_type(model: ModelSpec) -> bool:
+    return isinstance(model, type) and issubclass(model, BaseModel)
+
+
+def _is_instance_of_model(
+    value: Any,
+    model: ModelSpec,
+) -> bool:
+    model = _unwrap_annotated(model)
+    origin = get_origin(model)
+
+    checks = (
+        (model is Any, True),
+        (model is None or model is type(None), value is None),
+        (
+            origin in (Union, UnionType),
+            any(_is_instance_of_model(value, option) for option in get_args(model)),
+        ),
+        (
+            origin is Literal,
+            any(value == literal for literal in get_args(model)),
+        ),
+        (
+            origin is list,
+            (
+                isinstance(value, list)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is tuple,
+            _is_tuple_instance(value, get_args(model)),
+        ),
+        (
+            origin is dict,
+            _is_dict_instance(value, get_args(model)),
+        ),
+        (
+            origin is set,
+            (
+                isinstance(value, set)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is frozenset,
+            (
+                isinstance(value, frozenset)
+                and len(get_args(model)) == 1
+                and all(
+                    _is_instance_of_model(value_item, get_args(model)[0])
+                    for value_item in value
+                )
+            ),
+        ),
+        (
+            origin is not None and isinstance(origin, type),
+            isinstance(value, origin),
+        ),
+        (
+            isinstance(model, type),
+            isinstance(value, model),
+        ),
+    )
+
+    for matched, result in checks:
+        if matched:
+            return result
+
+    return False
+
+
+def _is_tuple_instance(
+    value: Any,
+    args: tuple[Any, ...],
+) -> bool:
+    if not isinstance(value, tuple):
+        return False
+
+    if len(args) == 2 and args[1] is Ellipsis:
+        return all(_is_instance_of_model(item, args[0]) for item in value)
+
+    return len(value) == len(args) and all(
+        _is_instance_of_model(item, item_model)
+        for item, item_model in zip(value, args, strict=True)
+    )
+
+
+def _is_dict_instance(
+    value: Any,
+    args: tuple[Any, ...],
+) -> bool:
+    return (
+        isinstance(value, dict)
+        and len(args) == 2
+        and all(
+            _is_instance_of_model(key, args[0]) and _is_instance_of_model(item, args[1])
+            for key, item in value.items()
+        )
+    )
+
+
+class PydanticCompiledModel:
+    """Compiled Pydantic runtime representation of a ModelSpec."""
+
+    def __init__(self, model_spec: ModelSpec) -> None:
+        self.model_spec = model_spec
+        self._is_base_model = _is_base_model_type(model_spec)
+        self._is_dataclass = isinstance(model_spec, type) and is_dataclass(model_spec)
+
+        if self._is_base_model or model_spec is ValidationError:
+            self._type_adapter = None
+        else:
+            self._type_adapter = PydanticModelAdapter._type_adapter(
+                model_spec,
+            )
+
+    def is_instance(self, value: Any) -> bool:
+        if self.model_spec is ValidationError:
+            return isinstance(value, ValidationError)
+
+        if self._is_base_model or self._is_dataclass:
+            return isinstance(value, self.model_spec)
+
+        return _is_instance_of_model(value, self.model_spec)
+
+    def validate_obj(self, value: Any) -> Any:
+        if self._is_base_model:
+            return self.model_spec.model_validate(value)
+
+        if self.model_spec is ValidationError:
+            return value
+
+        return self._type_adapter.validate_python(value)
+
+    def validate_json(self, value: bytes) -> Any:
+        if self._is_base_model:
+            return self.model_spec.model_validate_json(value)
+
+        if self.model_spec is ValidationError:
+            return ValidationErrorType.model_validate_json(value)
+
+        return self._type_adapter.validate_json(value)
+
+    def dump_json(
+        self,
+        value: Any,
+    ) -> bytes:
+        if isinstance(value, BaseModel):
+            return value.model_dump_json().encode("utf-8")
+
+        return PydanticModelAdapter._type_adapter(
+            type(value),
+        ).dump_json(value)
+
+    def json_schema(
+        self,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
+    ) -> dict[str, Any]:
+        if self._is_base_model:
+            return self.model_spec.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
+            )
+
+        if self.model_spec is ValidationError:
+            return ValidationErrorType.model_json_schema(
+                ref_template=ref_template,
+                mode=mode,
+            )
+
+        return self._type_adapter.json_schema(
+            ref_template=ref_template,
+            mode=mode,
+        )
+
+
+class PydanticModelAdapter(
+    ModelAdapter[Any, ValidationError, type[BaseFile]],
+):
     """Pydantic model adapter."""
 
     validation_error = ValidationError
     basefile = BaseFile
+
+    def __init__(self) -> None:
+        self._compiled_models: dict[ModelSpec, PydanticCompiledModel] = {}
+
+    def compile(
+        self,
+        model: ModelSpec,
+    ) -> PydanticCompiledModel:
+        try:
+            compiled = self._compiled_models.get(model)
+        except TypeError:
+            return PydanticCompiledModel(model)
+
+        if compiled is None:
+            compiled = PydanticCompiledModel(model)
+            self._compiled_models[model] = compiled
+
+        return compiled
 
     @staticmethod
     @cache
@@ -83,12 +297,6 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
             return TypeAdapter(model)
 
         return PydanticModelAdapter._cached_type_adapter(model)
-
-    @staticmethod
-    def _is_base_model_type(
-        model: ModelSpec,
-    ) -> bool:
-        return isinstance(model, type) and issubclass(model, BaseModel)
 
     def is_model_type(
         self,
@@ -113,18 +321,7 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        if self._is_base_model_type(model):
-            return isinstance(value, model)
-
-        try:
-            self._type_adapter(model).validate_python(
-                value,
-                strict=True,
-            )
-        except (ValidationError, TypeError, ValueError):
-            return False
-
-        return True
+        return self.compile(model).is_instance(value)
 
     def is_partial_model_instance(
         self,
@@ -156,29 +353,20 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         model: ModelSpec,
         value: Any,
     ) -> Any:
-        if self._is_base_model_type(model):
-            return model.model_validate(value)
-
-        return self._type_adapter(model).validate_python(value)
+        return self.compile(model).validate_obj(value)
 
     def validate_json(
         self,
         model: ModelSpec,
         value: bytes,
     ) -> Any:
-        if self._is_base_model_type(model):
-            return model.model_validate_json(value)
-
-        return self._type_adapter(model).validate_json(value)
+        return self.compile(model).validate_json(value)
 
     def dump_json(
         self,
         value: Any,
     ) -> bytes:
-        if isinstance(value, BaseModel):
-            return value.model_dump_json().encode("utf-8")
-
-        return self._type_adapter(type(value)).dump_json(value)
+        return self.compile(type(value)).dump_json(value)
 
     def make_root_model(
         self,
@@ -215,19 +403,7 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
         ref_template: str,
         mode: SchemaMode = "validation",
     ) -> dict[str, Any]:
-        if self._is_base_model_type(model):
-            return model.model_json_schema(
-                ref_template=ref_template,
-                mode=mode,
-            )
-
-        if model is ValidationError:
-            return ValidationErrorType.model_json_schema(
-                ref_template=ref_template,
-                mode=mode,
-            )
-
-        return self._type_adapter(model).json_schema(
+        return self.compile(model).json_schema(
             ref_template=ref_template,
             mode=mode,
         )
@@ -235,9 +411,11 @@ class PydanticModelAdapter(ModelAdapter[Any, ValidationError, type[BaseFile]]):
     def validation_errors(
         self,
         err: ValidationError,
-    ) -> Any:
+    ) -> list[dict[str, Any]]:
         return err.errors(include_context=False)
 
 
-def _model_name_for_generated_type(model: ModelSpec) -> str:
+def _model_name_for_generated_type(
+    model: ModelSpec,
+) -> str:
     return get_model_key(model).split(".", 1)[0]

@@ -1,19 +1,6 @@
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar
 
 ModelClass: TypeAlias = type[Any]
-
-# A ModelSpec is an adapter-supported Python type expression.
-#
-# Examples include:
-#
-#     User
-#     list[User]
-#     dict[str, User]
-#     Annotated[User, ...]
-#     User | None
-#
-# The concrete set of supported expressions is defined by the selected
-# ModelAdapter.
 ModelSpec: TypeAlias = Any
 
 ModelT = TypeVar("ModelT")
@@ -23,14 +10,45 @@ BaseFileT = TypeVar("BaseFileT")
 SchemaMode: TypeAlias = Literal["validation", "serialization"]
 
 
+class CompiledModel(Protocol[ModelT]):
+    """Adapter-specific runtime representation of a ModelSpec."""
+
+    model_spec: ModelSpec
+
+    def is_instance(self, value: Any) -> bool:
+        """Return whether value is already a valid instance of this model."""
+        ...
+
+    def validate_obj(self, value: Any) -> ModelT:
+        """Validate an already decoded Python value."""
+        ...
+
+    def validate_json(self, value: bytes) -> ModelT:
+        """Validate a JSON payload."""
+        ...
+
+    def dump_json(self, value: Any) -> bytes:
+        """Serialize a value to JSON."""
+        ...
+
+    def json_schema(
+        self,
+        *,
+        ref_template: str,
+        mode: SchemaMode = "validation",
+    ) -> dict[str, Any]:
+        """Generate the JSON schema for the compiled model."""
+        ...
+
+
 class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
-    """Adapter contract for validation, serialization and schema generation."""
+    """Contract for model validation, serialization and schema generation."""
 
     validation_error: type[ValidationErrorT]
     basefile: BaseFileT
 
     def is_model_type(self, value: ModelSpec) -> bool:
-        """Return whether ``value`` is a supported model/type expression."""
+        """Return whether value is a supported model/type expression."""
         ...
 
     def is_model_instance(
@@ -38,29 +56,32 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        """
-        Return whether ``value`` is already a valid instance of ``model``.
-
-        Returning ``True`` allows runtime validation/serialization paths to
-        avoid reconstructing an already valid model instance.
-        """
+        """Return whether value is already a valid instance of model."""
         ...
 
-    def is_partial_model_instance(self, value: Any) -> bool: ...
+    def is_partial_model_instance(self, value: Any) -> bool:
+        """Return whether value contains a model instance."""
+        ...
 
     def validate_obj(
         self,
         model: ModelSpec,
         value: Any,
-    ) -> ModelT: ...
+    ) -> ModelT:
+        """Validate a Python object against a model specification."""
+        ...
 
     def validate_json(
         self,
         model: ModelSpec,
         value: bytes,
-    ) -> ModelT: ...
+    ) -> ModelT:
+        """Validate JSON bytes against a model specification."""
+        ...
 
-    def dump_json(self, value: Any) -> bytes: ...
+    def dump_json(self, value: Any) -> bytes:
+        """Serialize a value to JSON."""
+        ...
 
     def make_root_model(
         self,
@@ -68,12 +89,16 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         name: str | None = None,
         module: str | None = None,
-    ) -> ModelSpec: ...
+    ) -> ModelSpec:
+        """Create an adapter-specific root model."""
+        ...
 
     def make_list_model(
         self,
         model: ModelSpec,
-    ) -> ModelSpec: ...
+    ) -> ModelSpec:
+        """Create an adapter-specific list model."""
+        ...
 
     def json_schema(
         self,
@@ -81,9 +106,20 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         *,
         ref_template: str,
         mode: SchemaMode = "validation",
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Generate the JSON schema for a model specification."""
+        ...
 
     def validation_errors(
         self,
         err: ValidationErrorT,
-    ) -> Any: ...
+    ) -> Any:
+        """Convert an adapter validation error to Spectree's error format."""
+        ...
+
+    def compile(
+        self,
+        model: ModelSpec,
+    ) -> CompiledModel[ModelT]:
+        """Compile a model specification into an adapter-specific runtime model."""
+        ...

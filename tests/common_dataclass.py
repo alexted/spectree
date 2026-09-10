@@ -1,12 +1,12 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, IntEnum
 from typing import Any
 
 
 class Order(IntEnum):
-    """Order enum"""
+    """Order enum."""
 
     asce = 0
     desc = 1
@@ -143,3 +143,9 @@ class OptionalListQuery:
 @dataclass
 class Child:
     value: int
+
+
+@dataclass
+class NestedDataclass:
+    child: SimpleModel
+    tags: list[int] = field(default_factory=list)
