@@ -1,14 +1,8 @@
-import warnings
 import weakref
 from collections import defaultdict
 from functools import wraps
 from importlib import import_module
-from typing import (
-    Any,
-    Callable,
-    Mapping,
-    Sequence,
-)
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 from spectree._types import (
     HookHandler,
@@ -17,17 +11,18 @@ from spectree._types import (
     NestedNamingStrategy,
 )
 from spectree.config import Configuration, ModeEnum
+from spectree.endpoint import REQUEST_MODEL_ARGUMENTS, EndpointSpec
 from spectree.metadata import (
     FunctionDecorator,
     is_validated_function,
     iter_wrapped_functions,
-    register_validated_function,
 )
-from spectree.model_adapter import ModelClass, get_pydantic_model_adapter
+from spectree.model_adapter import ModelSpec, get_pydantic_model_adapter
 from spectree.model_adapter.protocol import SchemaMode
 from spectree.models import Tag
 from spectree.plugins import PLUGINS, BasePlugin
 from spectree.response import Response
+from spectree.schema_registry import SchemaRegistry
 from spectree.utils import (
     default_after_handler,
     default_before_handler,
@@ -86,7 +81,7 @@ class SpecTree:
         before: HookHandler = default_before_handler,
         after: HookHandler = default_after_handler,
         validation_error_status: int = 422,
-        validation_error_model: ModelClass | None = None,
+        validation_error_model: Optional[ModelSpec] = None,
         naming_strategy: NamingStrategy = get_model_key,
         nested_naming_strategy: NestedNamingStrategy = get_nested_key,
         model_adapter: ModelAdapterType | None = None,
@@ -110,7 +105,10 @@ class SpecTree:
             plugin = PLUGINS[backend_name]
             module = import_module(plugin.name, plugin.package)
             self.backend = getattr(module, plugin.class_name)(self)
-        self.models: dict[str, Any] = {}
+        self.models = SchemaRegistry(
+            naming_strategy=self.naming_strategy,
+            nested_naming_strategy=self.nested_naming_strategy,
+        )
         self._function_metadata: weakref.WeakKeyDictionary[
             Callable, FunctionDecorator
         ] = weakref.WeakKeyDictionary()
@@ -165,12 +163,12 @@ class SpecTree:
 
     def validate(  # noqa: PLR0913, PLR0917
         self,
-        query: ModelClass | None = None,
-        json: ModelClass | None = None,
-        form: ModelClass | None = None,
-        headers: ModelClass | None = None,
-        cookies: ModelClass | None = None,
-        resp: Response | None = None,
+        query: Optional[ModelSpec] = None,
+        json: Optional[ModelSpec] = None,
+        form: Optional[ModelSpec] = None,
+        headers: Optional[ModelSpec] = None,
+        cookies: Optional[ModelSpec] = None,
+        resp: Optional[Response] = None,
         tags: Sequence = (),
         security: Any = None,
         deprecated: bool = False,
@@ -219,150 +217,224 @@ class SpecTree:
             validation_error_status = self.validation_error_status
 
         def decorate_validation(func: Callable):
-            # for sync framework
-            @wraps(func)
-            def sync_validate(*args: Any, **kwargs: Any):
-                return self.backend.validate(
-                    func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
-                    before or self.before,
-                    after or self.after,
-                    validation_error_status,
-                    skip_validation,
-                    force_resp_serialize,
-                    *args,
-                    **kwargs,
-                )
-
-            # for async framework
-            @wraps(func)
-            async def async_validate(*args: Any, **kwargs: Any):
-                return await self.backend.validate(
-                    func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
-                    before or self.before,
-                    after or self.after,
-                    validation_error_status,
-                    skip_validation,
-                    force_resp_serialize,
-                    *args,
-                    **kwargs,
-                )
-
-            validation: Callable = (
-                async_validate if self.backend.ASYNC else sync_validate  # type: ignore
-            )
+            resolved_annotations: Mapping[str, Any] = {}
 
             if self.config.annotations:
+                resolved_annotations = get_request_model_hints(func)
+
                 nonlocal query, json, form, headers, cookies
-                annotations = get_request_model_hints(func)
-                if skip_validation and annotations:
-                    warnings.warn(
-                        "`skip_validation` cannot be used with `annotations` enabled. "
-                        "The instances of `json`, `headers`, `cookies`, etc. read from "
-                        "the function will be `None`.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                query = annotations.get("query", query)
-                json = annotations.get("json", json)
-                form = annotations.get("form", form)
-                headers = annotations.get("headers", headers)
-                cookies = annotations.get("cookies", cookies)
 
-            metadata = FunctionDecorator()
+                query = resolved_annotations.get("query", query)
+                json = resolved_annotations.get("json", json)
+                form = resolved_annotations.get("form", form)
+                headers = resolved_annotations.get("headers", headers)
+                cookies = resolved_annotations.get("cookies", cookies)
 
-            # register
+            injected_arguments = frozenset(resolved_annotations)
+
+            request_model_keys: dict[str, str] = {}
+
             for name, model in zip(
-                ("query", "json", "form", "headers", "cookies"),
-                (query, json, form, headers, cookies),
+                REQUEST_MODEL_ARGUMENTS,
+                (
+                    query,
+                    json,
+                    form,
+                    headers,
+                    cookies,
+                ),
                 strict=True,
             ):
-                if model is not None:
-                    model_key = self._add_model(model=model, mode="validation")
-                    setattr(metadata, name, model_key)
+                if model is None:
+                    continue
+
+                request_model_keys[name] = self._add_model(
+                    model=model,
+                    mode="validation",
+                )
+
+            compiled_resp = None
 
             if resp:
-                resp.bind_model_adapter(self.model_adapter)
-                # Make sure that the endpoint specific status code and data model for
-                # validation errors shows up in the response spec.
-                resp.add_model(
+                compiled_resp = resp.copy_for_model_adapter(
+                    self.model_adapter,
+                )
+
+                compiled_resp.add_model(
                     validation_error_status,
                     self.validation_error_model or self.model_adapter.validation_error,
                     replace=False,
                 )
-                for model in resp.models:
-                    self._add_model(model=model, mode="serialization")
-                metadata.resp = resp
 
-            if tags:
-                metadata.tags = tags
+                for code, model in compiled_resp.code_models.items():
+                    model_key = self._add_model(
+                        model=model,
+                        mode="serialization",
+                    )
+                    compiled_resp._set_model_key(code, model_key)
 
-            metadata.security = security
-            metadata.deprecated = deprecated
-            metadata.path_parameter_descriptions = path_parameter_descriptions
-            metadata.operation_id = operation_id
-            self._function_metadata[validation] = metadata
-            register_validated_function(validation)
+            endpoint = EndpointSpec(
+                query=query,
+                json=json,
+                form=form,
+                headers=headers,
+                cookies=cookies,
+                response=compiled_resp,
+                injected_arguments=injected_arguments,
+                before=before or self.before,
+                after=after or self.after,
+                validation_error_status=validation_error_status,
+                skip_validation=skip_validation,
+                force_resp_serialize=force_resp_serialize,
+                tags=tuple(tags),
+                security=security,
+                deprecated=deprecated,
+                path_parameter_descriptions=(
+                    dict(path_parameter_descriptions)
+                    if path_parameter_descriptions is not None
+                    else None
+                ),
+                operation_id=operation_id,
+            )
+
+            if self.backend.ASYNC:
+
+                @wraps(func)
+                async def validation(*args: Any, **kwargs: Any):
+                    return await self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            else:
+
+                @wraps(func)
+                def validation(*args: Any, **kwargs: Any):
+                    return self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            for name, model_key in request_model_keys.items():
+                setattr(validation, name, model_key)
+
+            if resp:
+                compiled_resp = resp.copy_for_model_adapter(
+                    self.model_adapter,
+                )
+
+                compiled_resp.add_model(
+                    validation_error_status,
+                    self.validation_error_model or self.model_adapter.validation_error,
+                    replace=False,
+                )
+
+                for code, model in compiled_resp.code_models.items():
+                    model_key = self._add_model(
+                        model=model,
+                        mode="serialization",
+                    )
+                    compiled_resp._set_model_key(code, model_key)
+
+            endpoint = EndpointSpec(
+                query=query,
+                json=json,
+                form=form,
+                headers=headers,
+                cookies=cookies,
+                response=compiled_resp,
+                injected_arguments=injected_arguments,
+                before=before or self.before,
+                after=after or self.after,
+                validation_error_status=validation_error_status,
+                skip_validation=skip_validation,
+                force_resp_serialize=force_resp_serialize,
+                tags=tuple(tags),
+                security=security,
+                deprecated=deprecated,
+                path_parameter_descriptions=(
+                    dict(path_parameter_descriptions)
+                    if path_parameter_descriptions is not None
+                    else None
+                ),
+                operation_id=operation_id,
+            )
+
+            if self.backend.ASYNC:
+
+                @wraps(func)
+                async def validation(*args: Any, **kwargs: Any):
+                    return await self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            else:
+
+                @wraps(func)
+                def validation(*args: Any, **kwargs: Any):
+                    return self.backend.validate(
+                        func,
+                        endpoint,
+                        *args,
+                        **kwargs,
+                    )
+
+            for name, model_key in request_model_keys.items():
+                setattr(validation, name, model_key)
+
+            validation.resp = compiled_resp
+            validation.tags = endpoint.tags
+            validation.security = endpoint.security
+            validation.deprecated = endpoint.deprecated
+            validation.path_parameter_descriptions = (
+                endpoint.path_parameter_descriptions
+            )
+            validation.operation_id = endpoint.operation_id
+            validation._endpoint_spec = endpoint
+            validation._decorator = self
+
             return validation
 
         return decorate_validation
 
-    def _add_model(self, model: ModelClass, mode: SchemaMode = "validation") -> str:
+    def _add_model(
+        self,
+        model: ModelSpec,
+        mode: SchemaMode = "validation",
+    ) -> str:
         """
-        unified model processing
+        Register a model schema and return its OpenAPI component name.
 
-        :param model: model class to add to the schema
-        :param mode: schema generation mode - 'validation' for input models
-            and 'serialization' for output models
+        :param model: model used for request/response validation.
+        :param mode: schema generation mode:
+            'validation' for input models,
+            'serialization' for output models.
         """
-        model_key = self.naming_strategy(model)
-        schema = json_compatible_deepcopy(
-            self.model_adapter.json_schema(
-                model=model,
-                ref_template="#/components/schemas/{model}",
-                mode=mode,
-            )
+        schema = self.model_adapter.json_schema(
+            model=model,
+            ref_template="#/components/schemas/{model}",
+            mode=mode,
         )
 
-        definitions = schema.get("$defs")
-        if isinstance(definitions, dict):
-            # The adapter emits refs with its own $defs keys. Rewrite them to the
-            # final component names before _get_model_definitions lifts $defs.
-            replacements = {
-                f"#/components/schemas/{key}": (
-                    f"#/components/schemas/{self.nested_naming_strategy(model_key, key)}"
-                )
-                for key in definitions
-            }
-            schema_values: list[Any] = [schema]
-            while schema_values:
-                value = schema_values.pop()
-                if isinstance(value, dict):
-                    ref = value.get("$ref")
-                    if isinstance(ref, str) and ref in replacements:
-                        value["$ref"] = replacements[ref]
-                    schema_values.extend(value.values())
-                elif isinstance(value, list):
-                    schema_values.extend(value)
+        return self.models.register(
+            model=model,
+            mode=mode,
+            schema=schema,
+        )
 
-        self.models[model_key] = schema
-        return model_key
-
-    def _generate_spec(self) -> dict[str, Any]:
+    def _generate_spec(self) -> Dict[str, Any]:
         """
         generate OpenAPI spec according to routes and decorators
         """
+        models = self.models.snapshot()
+
         routes: dict[str, dict] = defaultdict(dict)
         tags = {}
         for route in self.backend.find_routes():
@@ -393,7 +465,7 @@ class SpecTree:
                     or self.backend.get_func_operation_id(func, path, method),
                     "description": desc or "",
                     "tags": [str(x) for x in metadata.tags],
-                    "parameters": metadata.parse_params(parameters[:], self.models),
+                    "parameters": metadata.parse_params(parameters[:], models),
                     "responses": metadata.parse_resp(self.naming_strategy),
                 }
 
@@ -415,7 +487,10 @@ class SpecTree:
             "tags": list(tags.values()),
             "paths": {**routes},
             "components": {
-                "schemas": {**self.models, **self._get_model_definitions()},
+                "schemas": {
+                    **models,
+                    **self._get_model_definitions(models),
+                },
             },
         }
 
@@ -433,18 +508,59 @@ class SpecTree:
         spec["security"] = get_security(self.config.security)
         return spec
 
-    def _get_model_definitions(self) -> dict[str, Any]:
+    def _get_model_definitions(
+        self,
+        models: Mapping[str, Any],
+    ) -> dict[str, Any]:
         """
-        handle nested models
+        Extract nested $defs into OpenAPI components without mutating the
+        supplied schema mapping.
         """
-        definitions = {}
-        def_key = "$defs"
-        for name, schema in self.models.items():
-            if def_key in schema:
-                for key, value in schema[def_key].items():
-                    composed_key = self.nested_naming_strategy(name, key)
-                    if composed_key not in definitions:
-                        definitions[composed_key] = value
-                del schema[def_key]
+        definitions: dict[str, Any] = {}
+
+        for name, schema in models.items():
+            nested = schema.get("$defs")
+            if not isinstance(nested, dict):
+                continue
+
+            self._collect_model_definitions(
+                parent_name=name,
+                definitions=nested,
+                output=definitions,
+            )
 
         return definitions
+
+    def _collect_model_definitions(
+        self,
+        *,
+        parent_name: str,
+        definitions: Mapping[str, Any],
+        output: dict[str, Any],
+    ) -> None:
+        for key, value in definitions.items():
+            component_name = self.nested_naming_strategy(
+                parent_name,
+                key,
+            )
+
+            if not isinstance(value, dict):
+                continue
+
+            nested_schema = json_compatible_deepcopy(value)
+            nested_defs = nested_schema.pop("$defs", None)
+
+            existing = output.get(component_name)
+            if existing is not None and existing != nested_schema:
+                raise ValueError(
+                    f"Nested schema collision for component {component_name!r}."
+                )
+
+            output[component_name] = nested_schema
+
+            if isinstance(nested_defs, dict):
+                self._collect_model_definitions(
+                    parent_name=component_name,
+                    definitions=nested_defs,
+                    output=output,
+                )

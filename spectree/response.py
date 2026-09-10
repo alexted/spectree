@@ -1,5 +1,6 @@
 import sys
 from collections.abc import Iterable
+from copy import copy
 from http import HTTPStatus
 from typing import Any, TypeAlias
 
@@ -71,6 +72,7 @@ class Response:
 
         self.code_models: dict[str, ModelClass] = {}
         self.code_descriptions: dict[str, str | None] = {}
+        self._model_keys: dict[str, str] = {}
         for code, model_and_description in code_models.items():
             assert code in DEFAULT_CODE_DESC, "invalid HTTP status code"
             description: str | None = None
@@ -84,7 +86,7 @@ class Response:
             else:
                 model = model_and_description
 
-            if model:
+            if model is not None:
                 self._raw_code_models[code] = model
                 assert description is None or isinstance(description, str), (
                     "invalid HTTP status code description"
@@ -94,6 +96,31 @@ class Response:
 
             if description:
                 self.code_descriptions[code] = description
+
+    def copy_for_model_adapter(
+        self,
+        model_adapter: ModelAdapterType,
+    ) -> "Response":
+        """
+        Create an adapter-bound copy without mutating this declaration.
+
+        The original Response remains reusable with another SpecTree/model adapter.
+        """
+        response = copy(self)
+
+        response.codes = list(self.codes)
+        response._raw_code_models = dict(self._raw_code_models)
+        response.code_models = {}
+        response.code_descriptions = dict(self.code_descriptions)
+        response._model_keys = {}
+        response.model_adapter = model_adapter
+
+        response.code_models = response._build_models(model_adapter)
+
+        return response
+
+    def _set_model_key(self, code: str, model_key: str) -> None:
+        self._model_keys[code] = model_key
 
     def bind_model_adapter(self, model_adapter: ModelAdapterType) -> None:
         """Bind a :py:class:`~spectree.model_adapter.ModelAdapter`"""
@@ -142,7 +169,9 @@ class Response:
         self._raw_code_models[code_name] = model
         if self.model_adapter is not None:
             self.code_models[code_name] = self._build_model(model, self.model_adapter)
-        if description:
+        if description is None:
+            self.code_descriptions.pop(code_name, None)
+        else:
             self.code_descriptions[code_name] = description
 
     def has_model(self) -> bool:
@@ -181,6 +210,7 @@ class Response:
         :returns: JSON
         """
         responses: dict[str, Any] = {}
+
         for code in self.codes:
             responses[parse_code(code)] = {
                 "description": self.get_code_description(code)
@@ -190,7 +220,8 @@ class Response:
             raise RuntimeError("Response must be bound to a model adapter")
 
         for code, model in self.code_models.items():
-            model_name = naming_strategy(model)
+            model_name = self._model_keys.get(code) or naming_strategy(model)
+
             responses[parse_code(code)] = {
                 "description": self.get_code_description(code),
                 "content": {

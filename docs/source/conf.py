@@ -118,9 +118,7 @@ def resolve_repository_links(app, doctree):
             continue
 
         if repository_path.is_relative_to(Path(app.srcdir)):
-            docname = (
-                repository_path.relative_to(app.srcdir).with_suffix("").as_posix()
-            )
+            docname = repository_path.relative_to(app.srcdir).with_suffix("").as_posix()
             if docname in app.env.found_docs:
                 refuri = app.builder.get_relative_uri(app.env.docname, docname)
                 if separator:
