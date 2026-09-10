@@ -42,7 +42,7 @@ class CompiledModel(Protocol[ModelT]):
 
 
 class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
-    """Contract for model validation, serialization and schema generation."""
+    """The protocol of model adapter."""
 
     validation_error: type[ValidationErrorT]
     basefile: BaseFileT
@@ -56,7 +56,7 @@ class ModelAdapter(Protocol[ModelT, ValidationErrorT, BaseFileT]):
         value: Any,
         model: ModelSpec,
     ) -> bool:
-        """Return whether value is already a valid instance of model."""
+        """Check if value is an instance of model under this adapter."""
         ...
 
     def is_partial_model_instance(self, value: Any) -> bool:

@@ -1,15 +1,14 @@
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import flask
 from flask import Blueprint, abort, current_app, jsonify, make_response, request
 
-from spectree._types import HookHandler
-from spectree.model_adapter import ModelSpec
+from spectree.endpoint import EndpointSpec
 from spectree.plugins.base import Context, validate_response
 from spectree.plugins.werkzeug_utils import WerkzeugPlugin, flask_response_unpack
 from spectree.response import Response
-from spectree.utils import cached_type_hints, get_multidict_items
+from spectree.utils import get_multidict_items
 
 
 class FlaskPlugin(WerkzeugPlugin):
@@ -107,17 +106,7 @@ class FlaskPlugin(WerkzeugPlugin):
     def validate(
         self,
         func: Callable,
-        query: Optional[ModelSpec],
-        json: Optional[ModelSpec],
-        form: Optional[ModelSpec],
-        headers: Optional[ModelSpec],
-        cookies: Optional[ModelSpec],
-        resp: Optional[Response],
-        before: HookHandler,
-        after: HookHandler,
-        validation_error_status: int,
-        skip_validation: bool,
-        force_resp_serialize: bool,
+        endpoint: EndpointSpec,
         *args: Any,
         **kwargs: Any,
     ):
@@ -130,36 +119,59 @@ class FlaskPlugin(WerkzeugPlugin):
             return func(*args, **kwargs)
 
         response, req_validation_error = None, None
-        if not skip_validation:
+
+        if not endpoint.skip_validation:
             try:
-                self.request_validation(request, query, json, form, headers, cookies)
+                self.request_validation(
+                    request,
+                    endpoint.query,
+                    endpoint.json,
+                    endpoint.form,
+                    endpoint.headers,
+                    endpoint.cookies,
+                )
             except self.model_adapter.validation_error as err:
                 req_validation_error = err
                 errors = self.model_adapter.validation_errors(err)
-                response = make_response(jsonify(errors), validation_error_status)
+                response = make_response(
+                    jsonify(errors),
+                    endpoint.validation_error_status,
+                )
 
-        before(request, response, req_validation_error, None, self.model_adapter)
+        endpoint.before(
+            request,
+            response,
+            req_validation_error,
+            None,
+            self.model_adapter,
+        )
 
         if req_validation_error is not None:
-            assert response  # make mypy happy
+            assert response
             abort(response)
 
-        if self.config.annotations:
-            annotations = cached_type_hints(func)
-            for name in ("query", "json", "form", "headers", "cookies"):
-                if annotations.get(name):
-                    kwargs[name] = getattr(
-                        getattr(request, "context", None), name, None
-                    )
+        for name in endpoint.injected_arguments:
+            kwargs[name] = getattr(
+                getattr(request, "context", None),
+                name,
+                None,
+            )
 
         result = func(*args, **kwargs)
 
         response, resp_validation_error = self.validate_response(
             result,
-            resp,
-            skip_validation,
-            force_resp_serialize,
+            endpoint.response,
+            endpoint.skip_validation,
+            endpoint.force_resp_serialize,
         )
-        after(request, response, resp_validation_error, None, self.model_adapter)
+
+        endpoint.after(
+            request,
+            response,
+            resp_validation_error,
+            None,
+            self.model_adapter,
+        )
 
         return response

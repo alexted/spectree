@@ -5,11 +5,7 @@ from typing import Annotated, Any, TypeAlias, Union, get_args, get_origin
 
 import msgspec
 
-from spectree.model_adapter.protocol import (
-    ModelAdapter,
-    ModelSpec,
-    SchemaMode,
-)
+from spectree.model_adapter.protocol import ModelAdapter, ModelSpec, SchemaMode
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
 
@@ -228,12 +224,11 @@ class MsgspecModelAdapter(
 ):
     """Msgspec model adapter."""
 
-    validation_error = msgspec.ValidationError
-    basefile = BaseFile
-
     def __init__(self) -> None:
-        self.encoder = msgspec.json.Encoder()
-        self._compiled_models: dict[ModelSpec, MsgspecCompiledModel] = {}
+        self._compiled_models: dict[
+            ModelSpec,
+            MsgspecCompiledModel,
+        ] = {}
 
     def compile(
         self,
@@ -259,10 +254,7 @@ class MsgspecModelAdapter(
 
         try:
             msgspec.inspect.type_info(value)
-        except (
-            TypeError,
-            ValueError,
-        ):
+        except (TypeError, ValueError):
             return False
 
         return True
@@ -317,7 +309,7 @@ class MsgspecModelAdapter(
         self,
         value: Any,
     ) -> bytes:
-        return self.encoder.encode(value)
+        return msgspec.json.encode(value)
 
     def make_root_model(
         self,

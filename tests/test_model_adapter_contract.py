@@ -2,11 +2,9 @@ from typing import Annotated, Literal
 
 import pytest
 
+from spectree.model_adapter import ModelSpec
 from spectree.utils import get_model_key, hash_module_path
-from tests.common_dataclass import (
-    NestedDataclass,
-    SimpleModel,
-)
+from tests.common_dataclass import DemoModel, NestedDataclass, SimpleModel
 
 
 def _partial_model_instance_value(model_case, kind):
@@ -263,7 +261,7 @@ def test_compiled_generic_model(model_case):
         [
             {"user_id": 1},
             {"user_id": 2},
-        ],
+        ]
     )
 
     assert model_case.dump_python(instance) == [
@@ -297,16 +295,19 @@ def test_plain_dataclass_is_supported_as_model(model_case):
     )
 
     assert instance == SimpleModel(user_id=1)
-    assert type(instance) is SimpleModel
     assert adapter.is_model_type(SimpleModel) is True
     assert adapter.is_model_instance(instance, SimpleModel) is True
-    assert (
-        adapter.is_model_instance(
-            {"user_id": 1},
-            SimpleModel,
-        )
-        is False
+    assert adapter.validate_json(
+        SimpleModel,
+        b'{"user_id":"1"}',
+    ) == SimpleModel(user_id=1)
+    assert adapter.dump_json(instance) == b'{"user_id":1}'
+
+    schema = adapter.json_schema(
+        SimpleModel,
+        ref_template="#/components/schemas/{model}",
     )
+    assert schema["properties"]["user_id"]["type"] == "integer"
 
 
 def test_nested_dataclass_is_supported_as_model(model_case):
@@ -314,15 +315,16 @@ def test_nested_dataclass_is_supported_as_model(model_case):
 
     instance = adapter.validate_obj(
         NestedDataclass,
-        {
-            "child": {
-                "user_id": "1",
-            },
-        },
+        {"child": {"user_id": "1"}},
     )
 
-    assert type(instance) is NestedDataclass
-    assert instance.child == SimpleModel(user_id=1)
+    assert instance == NestedDataclass(
+        child=SimpleModel(user_id=1),
+        tags=[],
+    )
+    assert adapter.is_model_type(NestedDataclass) is True
+    assert adapter.is_model_instance(instance, NestedDataclass) is True
+    assert adapter.dump_json(instance) == (b'{"child":{"user_id":1},"tags":[]}')
 
 
 def test_dataclass_list_is_supported_as_model(model_case):
@@ -549,3 +551,27 @@ def test_compiled_model_annotation_preserves_origin(model_case):
         )
         is False
     )
+
+
+def test_model_spec_accepts_generic_alias():
+    model: ModelSpec = list[DemoModel]
+    assert model == list[DemoModel]
+
+
+def test_compiled_model(model_case):
+    adapter = model_case.adapter
+    model = model_case.get_model(SimpleModel)
+
+    compiled = adapter.compile(model)
+
+    instance = compiled.validate_obj({"user_id": "1"})
+
+    assert model_case.dump_python(instance) == {"user_id": 1}
+    assert compiled.is_instance(instance) is True
+    assert compiled.is_instance({"user_id": 1}) is False
+
+
+def test_plain_dataclass_is_partial_model_instance(model_case):
+    instance = SimpleModel(user_id=1)
+
+    assert model_case.adapter.is_partial_model_instance(instance) is True

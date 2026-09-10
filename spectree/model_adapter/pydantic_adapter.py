@@ -13,11 +13,7 @@ from pydantic import (
 )
 from pydantic_core import core_schema
 
-from spectree.model_adapter.protocol import (
-    ModelAdapter,
-    ModelSpec,
-    SchemaMode,
-)
+from spectree.model_adapter.protocol import ModelAdapter, ModelSpec, SchemaMode
 from spectree.models import ValidationErrorElement
 from spectree.utils import get_model_key
 
@@ -193,13 +189,13 @@ class PydanticCompiledModel:
             )
 
     def is_instance(self, value: Any) -> bool:
-        if self.model_spec is ValidationError:
-            return isinstance(value, ValidationError)
-
         if self._is_base_model or self._is_dataclass:
             return isinstance(value, self.model_spec)
 
-        return _is_instance_of_model(value, self.model_spec)
+        return _is_instance_of_model(
+            value,
+            self.model_spec,
+        )
 
     def validate_obj(self, value: Any) -> Any:
         if self._is_base_model:
@@ -219,10 +215,7 @@ class PydanticCompiledModel:
 
         return self._type_adapter.validate_json(value)
 
-    def dump_json(
-        self,
-        value: Any,
-    ) -> bytes:
+    def dump_json(self, value: Any) -> bytes:
         if isinstance(value, BaseModel):
             return value.model_dump_json().encode("utf-8")
 
