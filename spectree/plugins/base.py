@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
@@ -11,9 +11,9 @@ from typing import (
 )
 from spectree._types import JsonType, ModelAdapterType
 from spectree.config import Configuration
+from spectree.request_data import RequestData
 from spectree.endpoint import EndpointSpec
 from spectree.model_adapter import ModelSpec
-from spectree.request_data import RequestData
 
 if TYPE_CHECKING:
     from spectree.spec import SpecTree
