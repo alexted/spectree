@@ -240,17 +240,71 @@ class SpecTree:
             validation_error_status = self.validation_error_status
 
         def decorate_validation(func: Callable):
+            # Resolve the models of this function only. The arguments of
+            # `validate()` are shared by every function this decorator object is
+            # applied to, so they must never be reassigned here.
+            query_model, json_model, form_model, headers_model, cookies_model = (
+                query,
+                json,
+                form,
+                headers,
+                cookies,
+            )
+            if self.config.annotations:
+                annotations = get_request_model_hints(func)
+                if skip_validation and annotations:
+                    warnings.warn(
+                        "`skip_validation` cannot be used with `annotations` enabled. "
+                        "The instances of `json`, `headers`, `cookies`, etc. read from "
+                        "the function will be `None`.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                query_model = annotations.get("query", query_model)
+                json_model = annotations.get("json", json_model)
+                form_model = annotations.get("form", form_model)
+                headers_model = annotations.get("headers", headers_model)
+                cookies_model = annotations.get("cookies", cookies_model)
+
+            metadata = FunctionDecorator()
+
+            # register
+            for name, model in zip(
+                ("query", "json", "form", "headers", "cookies"),
+                (query_model, json_model, form_model, headers_model, cookies_model),
+                strict=True,
+            ):
+                if model is not None:
+                    model_key = self._add_model(model=model, mode="validation")
+                    setattr(metadata, name, model_key)
+
+            # Bind a copy so that the caller's declaration is never modified and
+            # can be shared by other endpoints and `SpecTree` instances.
+            endpoint_resp = None
+            if resp:
+                endpoint_resp = resp.copy_for_model_adapter(self.model_adapter)
+                # Make sure that the endpoint specific status code and data model for
+                # validation errors shows up in the response spec.
+                endpoint_resp.add_model(
+                    validation_error_status,
+                    self.validation_error_model or self.model_adapter.validation_error,
+                    replace=False,
+                )
+                for model in endpoint_resp.models:
+                    self._add_model(model=model, mode="serialization")
+                metadata.resp = endpoint_resp
+
             # for sync framework
             @wraps(func)
             def sync_validate(*args: Any, **kwargs: Any):
                 return self.backend.validate(
                     func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
+                    query_model,
+                    json_model,
+                    form_model,
+                    headers_model,
+                    cookies_model,
+                    endpoint_resp,
                     before or self.before,
                     after or self.after,
                     validation_error_status,
@@ -265,12 +319,12 @@ class SpecTree:
             async def async_validate(*args: Any, **kwargs: Any):
                 return await self.backend.validate(
                     func,
-                    query,
-                    json,
-                    form,
-                    headers,
-                    cookies,
-                    resp,
+                    query_model,
+                    json_model,
+                    form_model,
+                    headers_model,
+                    cookies_model,
+                    endpoint_resp,
                     before or self.before,
                     after or self.after,
                     validation_error_status,
@@ -283,48 +337,6 @@ class SpecTree:
             validation: Callable = (
                 async_validate if self.backend.ASYNC else sync_validate  # type: ignore
             )
-
-            if self.config.annotations:
-                nonlocal query, json, form, headers, cookies
-                annotations = get_request_model_hints(func)
-                if skip_validation and annotations:
-                    warnings.warn(
-                        "`skip_validation` cannot be used with `annotations` enabled. "
-                        "The instances of `json`, `headers`, `cookies`, etc. read from "
-                        "the function will be `None`.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
-                query = annotations.get("query", query)
-                json = annotations.get("json", json)
-                form = annotations.get("form", form)
-                headers = annotations.get("headers", headers)
-                cookies = annotations.get("cookies", cookies)
-
-            metadata = FunctionDecorator()
-
-            # register
-            for name, model in zip(
-                ("query", "json", "form", "headers", "cookies"),
-                (query, json, form, headers, cookies),
-                strict=True,
-            ):
-                if model is not None:
-                    model_key = self._add_model(model=model, mode="validation")
-                    setattr(metadata, name, model_key)
-
-            if resp:
-                resp.bind_model_adapter(self.model_adapter)
-                # Make sure that the endpoint specific status code and data model for
-                # validation errors shows up in the response spec.
-                resp.add_model(
-                    validation_error_status,
-                    self.validation_error_model or self.model_adapter.validation_error,
-                    replace=False,
-                )
-                for model in resp.models:
-                    self._add_model(model=model, mode="serialization")
-                metadata.resp = resp
 
             if tags:
                 metadata.tags = tags

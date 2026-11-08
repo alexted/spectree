@@ -1,4 +1,5 @@
 import gc
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -17,8 +18,9 @@ from starlette.testclient import TestClient as StarletteTestClient
 
 from spectree import Response
 from spectree.config import Configuration
-from spectree.model_adapter import get_pydantic_model_adapter
+from spectree.model_adapter import get_msgspec_model_adapter, get_pydantic_model_adapter
 from spectree.models import Server
+from spectree.plugins.base import BasePlugin
 from spectree.plugins.flask_plugin import FlaskPlugin
 from spectree.spec import SpecTree
 from spectree.utils import get_model_key
@@ -519,6 +521,57 @@ def _component_name(ref):
     return ref.removeprefix("#/components/schemas/")
 
 
+@dataclass
+class FirstBody:
+    a: int
+
+
+@dataclass
+class SecondBody:
+    b: str
+
+
+def test_reused_validate_decorator_resolves_models_per_function(model_case):
+    api = SpecTree("flask", model_adapter=model_case.adapter)
+    app = Flask(__name__)
+    first_model = model_case.get_model(FirstBody)
+    second_model = model_case.get_model(SecondBody)
+    decorator = api.validate()
+
+    @app.post("/first")
+    @decorator
+    def first(json: first_model):
+        return {"a": json.a}
+
+    @app.post("/untyped")
+    @decorator
+    def untyped():
+        return {"ok": True}
+
+    @app.post("/second")
+    @decorator
+    def second(json: second_model):
+        return {"b": json.b}
+
+    api.register(app)
+    client = app.test_client()
+
+    assert client.post("/first", json={"a": 1}).json == {"a": 1}
+    assert client.post("/first", json={"b": "x"}).status_code == 422
+    assert client.post("/untyped").json == {"ok": True}
+    assert client.post("/second", json={"b": "x"}).json == {"b": "x"}
+
+    with app.app_context():
+        paths = api.spec["paths"]
+    assert "requestBody" not in paths["/untyped"]["post"]
+    assert _component_name(_json_schema_ref(paths["/first"]["post"])) == (
+        get_model_key(first_model)
+    )
+    assert _component_name(_json_schema_ref(paths["/second"]["post"])) == (
+        get_model_key(second_model)
+    )
+
+
 def test_spec_is_regenerated_for_endpoints_decorated_after_first_access(model_case):
     api = SpecTree("flask", model_adapter=model_case.adapter)
     app = Flask(__name__)
@@ -547,6 +600,54 @@ def test_spec_is_regenerated_for_endpoints_decorated_after_first_access(model_ca
     assert len(second["components"]["schemas"]) > 1
     assert second["components"]["schemas"] == first["components"]["schemas"]
     assert_component_refs_resolve(second)
+
+
+def test_response_declaration_is_shared_without_being_modified(model_case):
+    resp_model = model_case.get_model(Resp)
+    shared = Response("HTTP_201", HTTP_200=resp_model)
+    first = SpecTree("flask", model_adapter=model_case.adapter)
+    second = SpecTree(
+        "flask", model_adapter=model_case.adapter, validation_error_status=400
+    )
+
+    first_endpoint = first.validate(resp=shared)(lambda: None)
+    second_endpoint = second.validate(resp=shared)(lambda: None)
+
+    assert shared.model_adapter is None
+    assert shared.codes == ["HTTP_201"]
+    assert shared.code_models == {}
+    assert first.get_function_metadata(first_endpoint).resp.find_model(400) is None
+    assert set(first.get_function_metadata(first_endpoint).resp.code_models) == {
+        "HTTP_200",
+        "HTTP_422",
+    }
+    assert set(second.get_function_metadata(second_endpoint).resp.code_models) == {
+        "HTTP_200",
+        "HTTP_400",
+    }
+
+
+@pytest.mark.pydantic
+@pytest.mark.msgspec
+def test_response_declaration_can_be_shared_by_different_model_adapters():
+    pytest.importorskip("pydantic")
+    pytest.importorskip("msgspec")
+    shared = Response(HTTP_200=Resp)
+
+    for adapter in (get_pydantic_model_adapter(), get_msgspec_model_adapter()):
+        api = SpecTree("flask", model_adapter=adapter)
+        app = Flask(__name__)
+
+        @app.get("/resp")
+        @api.validate(resp=shared)
+        def resp():
+            return {"name": "spectree", "score": [1]}
+
+        api.register(app)
+        with app.app_context():
+            spec = api.spec
+        assert app.test_client().get("/resp").status_code == 200
+        assert_component_refs_resolve(spec)
 
 
 @pytest.mark.pydantic
@@ -686,6 +787,72 @@ def test_list_models_can_be_reused_by_several_endpoints(model_case):
     assert _response_schema_ref(first) == _response_schema_ref(second)
     assert_component_refs_resolve(spec)
     assert app.test_client().post("/b", json=[{"value": 1}]).json == [{"value": 1}]
+
+
+def test_one_handler_decorated_twice_is_documented_per_route(model_case):
+    api = SpecTree("flask", model_adapter=model_case.adapter)
+    app = Flask(__name__)
+    first_model = model_case.get_model(FirstBody)
+    second_model = model_case.get_model(SecondBody)
+
+    def handler():
+        return {}
+
+    app.add_url_rule(
+        "/first", "first", api.validate(json=first_model)(handler), methods=["POST"]
+    )
+    app.add_url_rule(
+        "/second", "second", api.validate(json=second_model)(handler), methods=["POST"]
+    )
+    api.register(app)
+    with app.app_context():
+        paths = api.spec["paths"]
+
+    assert _component_name(_json_schema_ref(paths["/first"]["post"])) == (
+        get_model_key(first_model)
+    )
+    assert _component_name(_json_schema_ref(paths["/second"]["post"])) == (
+        get_model_key(second_model)
+    )
+
+
+def test_custom_backend_receives_the_v3_validate_arguments(model_case):
+    calls = []
+
+    class RecordingPlugin(BasePlugin):
+        def validate(
+            self,
+            func,
+            query,
+            json,
+            form,
+            headers,
+            cookies,
+            resp,
+            before,
+            after,
+            validation_error_status,
+            skip_validation,
+            force_resp_serialize,
+            *args,
+            **kwargs,
+        ):
+            calls.append((json, resp, validation_error_status, skip_validation))
+            return func(*args, **kwargs)
+
+    api = SpecTree(backend=RecordingPlugin, model_adapter=model_case.adapter)
+    payload = model_case.get_model(Payload)
+    declaration = Response(HTTP_200=None)
+    view = api.validate(json=payload, resp=declaration, validation_error_status=400)(
+        lambda: "ok"
+    )
+
+    assert view() == "ok"
+    ((json_model, resp, status, skip_validation),) = calls
+    assert json_model is payload
+    assert resp is not declaration
+    assert resp.find_model(400) is api.model_adapter.validation_error
+    assert (status, skip_validation) == (400, False)
 
 
 @dataclass
@@ -852,3 +1019,22 @@ def test_list_of_optional_models_as_response_model(model_case):
     with app.app_context():
         assert_component_refs_resolve(api.spec)
     assert app.test_client().get("/items").json == [{"value": 1}, None]
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 14), reason="annotations are evaluated lazily from 3.14"
+)
+def test_lazily_evaluated_type_checking_annotations(model_case):
+    case = import_module("tests.lazy_annotation_case")
+    api = SpecTree("flask", model_adapter=model_case.adapter)
+    app = Flask(__name__)
+    app.add_url_rule("/view", view_func=api.validate()(case.view), methods=["POST"])
+    api.register(app)
+
+    response = app.test_client().post(
+        "/view", json={"uid": 1, "limit": 2, "name": "spectree"}
+    )
+
+    assert response.json == {"name": "spectree"}
+    with app.app_context():
+        assert "requestBody" in api.spec["paths"]["/view"]["post"]
